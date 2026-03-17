@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { externalSupabase } from "@/integrations/supabase/external-client";
 
 interface MedFormData {
   name: string;
@@ -78,8 +79,24 @@ export default function MedScanForm() {
       return;
     }
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 1200));
+    const { error } = await externalSupabase.from("medications").insert({
+      name: form.name,
+      lab: form.lab,
+      dosage: form.dosage,
+      pharma_form: form.pharmaForm,
+      quantity: Number(form.quantity),
+      batch: form.batch || null,
+      expiry: form.expiry || null,
+    });
     setSaving(false);
+    if (error) {
+      toast({
+        title: "Erro ao salvar",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
     setSaved(true);
     toast({
       title: "Salvo no estoque!",
