@@ -26,7 +26,11 @@ const EMPTY_FORM: MedFormData = {
   expiry: "",
 };
 
-export default function MedScanForm() {
+interface Props {
+  onSaved?: () => void;
+}
+
+export default function MedScanForm({ onSaved }: Props) {
   const [image, setImage] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [form, setForm] = useState<MedFormData>(EMPTY_FORM);
@@ -47,29 +51,93 @@ export default function MedScanForm() {
   };
 
   const handleReadProduct = async () => {
-    if (!image) return;
+    if (!imageFile) return;
     setReading(true);
-    // Simulated AI fill — replace with real call later
-    await new Promise((r) => setTimeout(r, 2000));
-    setForm({
-      name: "Dipirona Sódica",
-      lab: "EMS Pharma",
-      dosage: "500mg",
-      pharmaForm: "Comprimido",
-      quantity: "20",
-      batch: "LT2024-08A",
-      expiry: "2026-08",
-    });
-    setReading(false);
-    toast({
-      title: "Produto identificado",
-      description: "Verifique os dados e edite se necessário.",
-    });
+    try {
+      // Convert image to base64
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1]);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(imageFile);
+      });
+
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY ?? "AIzaSyBqKkqoHhZxhLgztkFPx81nRphN_mKc65A";
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: imageFile.type || "image/jpeg",
+                    data: base64,
+                  },
+                },
+                {
+                  text: `Analise a embalagem deste medicamento e extraia as informações. Responda SOMENTE com um JSON válido, sem markdown, sem explicações, no formato:
+{
+  "name": "nome do medicamento",
+  "lab": "laboratório fabricante",
+  "dosage": "dosagem ex: 500mg",
+  "pharmaForm": "forma farmacêutica ex: Comprimido",
+  "quantity": "quantidade numérica de unidades na embalagem",
+  "batch": "número do lote ou vazio se não visível",
+  "expiry": "validade no formato YYYY-MM ou vazio se não visível"
+}`,
+                },
+              ],
+            }],
+            generationConfig: { temperature: 0.1 },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(`Gemini ${response.status}: ${JSON.stringify(errBody)}`);
+      }
+
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      // Remove markdown code fences if Gemini wraps the response
+      const clean = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      const parsed = JSON.parse(clean);
+
+      setForm({
+        name: parsed.name ?? "",
+        lab: parsed.lab ?? "",
+        dosage: parsed.dosage ?? "",
+        pharmaForm: parsed.pharmaForm ?? "",
+        quantity: parsed.quantity ?? "",
+        batch: parsed.batch ?? "",
+        expiry: parsed.expiry ?? "",
+      });
+      toast({
+        title: "Produto identificado",
+        description: "Verifique os dados e edite se necessário.",
+      });
+    } catch (err) {
+      console.error("Gemini error:", err);
+      toast({
+        title: "Erro ao ler produto",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
+      });
+    } finally {
+      setReading(false);
+    }
   };
 
   const handleSave = async () => {
     const required: (keyof MedFormData)[] = ["name", "lab", "dosage", "pharmaForm", "quantity"];
-    const missing = required.filter((k) => !form[k].trim());
+    const missing = required.filter((k) => !String(form[k] ?? "").trim());
     if (missing.length) {
       toast({
         title: "Campos obrigatórios",
@@ -79,15 +147,60 @@ export default function MedScanForm() {
       return;
     }
     setSaving(true);
-    const { error } = await externalSupabase.from("medications").insert({
-      name: form.name,
-      lab: form.lab,
-      dosage: form.dosage,
-      pharma_form: form.pharmaForm,
-      quantity: Number(form.quantity),
-      batch: form.batch || null,
-      expiry: form.expiry || null,
-    });
+
+    // Upload image to storage
+    let imagem_url: string | null = null;
+    if (imageFile) {
+      const ext = imageFile.name.split(".").pop() ?? "jpg";
+      const path = `${Date.now()}_${form.name.replace(/\s+/g, "_")}.${ext}`;
+      const { error: uploadError } = await externalSupabase.storage
+        .from("medicamentos")
+        .upload(path, imageFile, { upsert: true });
+      if (!uploadError) {
+        const { data: urlData } = externalSupabase.storage
+          .from("medicamentos")
+          .getPublicUrl(path);
+        imagem_url = urlData.publicUrl;
+      }
+    }
+
+    // Check if same product already exists (nome + dosagem + laboratorio)
+    const { data: existing } = await externalSupabase
+      .from("medicamentos")
+      .select("id, quantidade")
+      .eq("nome", form.name)
+      .eq("dosagem", form.dosage)
+      .eq("laboratorio", form.lab)
+      .maybeSingle();
+
+    let error;
+    let updated = false;
+
+    if (existing) {
+      const novaQtd = (existing.quantidade ?? 0) + Number(form.quantity);
+      ({ error } = await externalSupabase
+        .from("medicamentos")
+        .update({
+          quantidade: novaQtd,
+          lote: form.batch || null,
+          validade: form.expiry || null,
+          ...(imagem_url ? { imagem_url } : {}),
+        })
+        .eq("id", existing.id));
+      updated = true;
+    } else {
+      ({ error } = await externalSupabase.from("medicamentos").insert({
+        nome: form.name,
+        laboratorio: form.lab,
+        dosagem: form.dosage,
+        forma: form.pharmaForm,
+        quantidade: Number(form.quantity),
+        lote: form.batch || null,
+        validade: form.expiry || null,
+        imagem_url,
+      }));
+    }
+
     setSaving(false);
     if (error) {
       toast({
@@ -98,9 +211,12 @@ export default function MedScanForm() {
       return;
     }
     setSaved(true);
+    onSaved?.();
     toast({
-      title: "Salvo no estoque!",
-      description: `${form.name} adicionado com sucesso.`,
+      title: updated ? "Estoque atualizado!" : "Salvo no estoque!",
+      description: updated
+        ? `Quantidade de ${form.name} somada ao estoque existente.`
+        : `${form.name} adicionado com sucesso.`,
     });
   };
 
@@ -120,20 +236,7 @@ export default function MedScanForm() {
   const formFilled = Object.values(form).some((v) => v.trim() !== "");
 
   return (
-    <div className="min-h-screen bg-surface flex flex-col items-center justify-start py-10 px-4">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-8">
-        <div className="bg-medical p-2 rounded-xl">
-          <Package className="w-6 h-6 text-medical-foreground" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-deep leading-tight">Cadastro por Foto</h1>
-          <p className="text-sm text-slate-muted">Escaneie a embalagem e preencha automaticamente</p>
-        </div>
-      </div>
-
-      {/* Card */}
-      <div className="w-full max-w-[650px] bg-card rounded-2xl shadow-card border border-silver p-6 md:p-8 space-y-6">
+    <div className="w-full max-w-[650px] bg-card rounded-2xl shadow-card border border-silver p-6 md:p-8 space-y-6">
 
         {/* Upload Zone */}
         <div>
@@ -323,9 +426,6 @@ export default function MedScanForm() {
             )}
           </div>
         )}
-      </div>
-
-      <p className="mt-6 text-xs text-slate-muted">MedScan · Gestão de Estoque Farmacêutico</p>
     </div>
   );
 }
