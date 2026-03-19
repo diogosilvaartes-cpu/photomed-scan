@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase } from "@/integrations/supabase/external-client";
-import { BrowserMultiFormatReader, NotFoundException } from "@zxing/browser";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 
 type Mode = "barcode" | "photo";
 
@@ -119,7 +119,7 @@ export default function MedScanForm({ onSaved }: Props) {
         undefined,
         videoRef.current,
         async (result, err) => {
-          if (err instanceof NotFoundException) return;
+          if (err && (err as any).name === "NotFoundException") return;
           if (!result) return;
           stopScanner();
           const raw = result.getText();
