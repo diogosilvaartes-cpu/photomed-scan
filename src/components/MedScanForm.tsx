@@ -177,55 +177,14 @@ export default function MedScanForm({ onSaved }: Props) {
         reader.onerror = reject;
         reader.readAsDataURL(imageFile);
       });
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY ?? "";
       const mimeType = imageFile.type || "image/jpeg";
-      const response = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o",
-            temperature: 0.1,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "image_url",
-                    image_url: { url: `data:${mimeType};base64,${base64}` },
-                  },
-                  {
-                    type: "text",
-                    text: `Analise a embalagem deste medicamento e extraia as informações. Responda SOMENTE com um JSON válido, sem markdown, sem explicações, no formato:
-{
-  "name": "nome do medicamento",
-  "lab": "laboratório fabricante",
-  "dosage": "dosagem ex: 500mg",
-  "pharmaForm": "forma farmacêutica ex: Comprimido",
-  "quantity": "quantidade numérica de unidades na embalagem",
-  "batch": "número do lote ou vazio se não visível",
-  "expiry": "validade no formato YYYY-MM ou vazio se não visível"
-}`,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
-      if (!response.ok) throw new Error(`OpenAI ${response.status}`);
-      const data = await response.json();
-      const text = data.choices?.[0]?.message?.content ?? "";
-      const clean = text
-        .trim()
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```$/, "")
-        .trim();
-      const parsed = JSON.parse(clean);
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base64, mimeType }),
+      });
+      if (!response.ok) throw new Error(`Erro ${response.status}`);
+      const parsed = await response.json();
       setForm({
         name: parsed.name ?? "",
         lab: parsed.lab ?? "",
