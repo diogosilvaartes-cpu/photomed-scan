@@ -177,25 +177,29 @@ export default function MedScanForm({ onSaved }: Props) {
         reader.onerror = reject;
         reader.readAsDataURL(imageFile);
       });
-      const apiKey =
-        import.meta.env.VITE_GEMINI_API_KEY ??
-        "AIzaSyDNeKt5VG3iSlUF5g07YqpytfwCVjtny7k";
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY ?? "";
+      const mimeType = imageFile.type || "image/jpeg";
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        "https://api.openai.com/v1/chat/completions",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
           body: JSON.stringify({
-            contents: [
+            model: "gpt-4o",
+            temperature: 0.1,
+            messages: [
               {
-                parts: [
+                role: "user",
+                content: [
                   {
-                    inlineData: {
-                      mimeType: imageFile.type || "image/jpeg",
-                      data: base64,
-                    },
+                    type: "image_url",
+                    image_url: { url: `data:${mimeType};base64,${base64}` },
                   },
                   {
+                    type: "text",
                     text: `Analise a embalagem deste medicamento e extraia as informações. Responda SOMENTE com um JSON válido, sem markdown, sem explicações, no formato:
 {
   "name": "nome do medicamento",
@@ -210,13 +214,12 @@ export default function MedScanForm({ onSaved }: Props) {
                 ],
               },
             ],
-            generationConfig: { temperature: 0.1 },
           }),
         }
       );
-      if (!response.ok) throw new Error(`Gemini ${response.status}`);
+      if (!response.ok) throw new Error(`OpenAI ${response.status}`);
       const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const text = data.choices?.[0]?.message?.content ?? "";
       const clean = text
         .trim()
         .replace(/^```(?:json)?\s*/i, "")
