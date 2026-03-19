@@ -30,7 +30,7 @@ export default function Estoque() {
     async function load() {
       setLoading(true);
       const { data } = await externalSupabase
-        .from("medicamentos")
+        .from("estoque")
         .select("*")
         .order("nome", { ascending: true });
       setItems(data ?? []);

@@ -166,7 +166,7 @@ export default function MedScanForm({ onSaved }: Props) {
 
     // Check if same product already exists (nome + dosagem + laboratorio)
     const { data: existing } = await externalSupabase
-      .from("medicamentos")
+      .from("estoque")
       .select("id, quantidade")
       .eq("nome", form.name)
       .eq("dosagem", form.dosage)
@@ -179,7 +179,7 @@ export default function MedScanForm({ onSaved }: Props) {
     if (existing) {
       const novaQtd = (existing.quantidade ?? 0) + Number(form.quantity);
       ({ error } = await externalSupabase
-        .from("medicamentos")
+        .from("estoque")
         .update({
           quantidade: novaQtd,
           lote: form.batch || null,
@@ -189,7 +189,7 @@ export default function MedScanForm({ onSaved }: Props) {
         .eq("id", existing.id));
       updated = true;
     } else {
-      ({ error } = await externalSupabase.from("medicamentos").insert({
+      ({ error } = await externalSupabase.from("estoque").insert({
         nome: form.name,
         laboratorio: form.lab,
         dosagem: form.dosage,
