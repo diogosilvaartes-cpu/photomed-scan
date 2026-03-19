@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Loader2, PackageSearch, ArrowLeft, ImageOff, X } from "lucide-react";
+import { Loader2, PackageSearch, ImageOff, X } from "lucide-react";
 
 interface Medicamento {
   id: string;
@@ -20,7 +18,6 @@ interface Medicamento {
 }
 
 export default function Estoque() {
-  const navigate = useNavigate();
   const [items, setItems] = useState<Medicamento[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -84,9 +81,6 @@ export default function Estoque() {
 
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/")}>
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
           <PackageSearch className="w-6 h-6 text-blue-600" />
           <h1 className="text-2xl font-bold text-gray-800">Estoque de Medicamentos</h1>
           <Badge variant="secondary" className="ml-auto text-sm">
