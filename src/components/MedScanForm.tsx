@@ -85,6 +85,28 @@ async function lookupByGTIN(gtin: string): Promise<Partial<MedFormData>> {
   }
 }
 
+async function compressImage(file: File, maxPx = 1200, quality = 0.78): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) =>
+          resolve(new File([blob!], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" })),
+        "image/jpeg",
+        quality
+      );
+    };
+    img.src = url;
+  });
+}
+
 export default function MedScanForm({ onSaved }: Props) {
   const [mode, setMode] = useState<Mode>("photo");
   const [image, setImage] = useState<string | null>(null);
@@ -158,11 +180,12 @@ export default function MedScanForm({ onSaved }: Props) {
     if (mode !== "barcode") stopScanner();
   }, [mode, stopScanner]);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setImageFile(file);
-    setImage(URL.createObjectURL(file));
+    const compressed = await compressImage(file);
+    setImageFile(compressed);
+    setImage(URL.createObjectURL(compressed));
     setForm(EMPTY_FORM);
     setSaved(false);
   };
@@ -449,7 +472,6 @@ export default function MedScanForm({ onSaved }: Props) {
               ref={inputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               className="hidden"
               onChange={handleImageChange}
             />
@@ -620,7 +642,6 @@ export default function MedScanForm({ onSaved }: Props) {
                 ref={inputRef}
                 type="file"
                 accept="image/*"
-                capture="environment"
                 className="hidden"
                 onChange={handleImageChange}
               />
