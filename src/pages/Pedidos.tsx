@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, RefreshCw, Phone, MapPin, CreditCard, Package } from "lucide-react";
+import { Loader2, RefreshCw, Phone, MapPin, CreditCard, Package, ChevronRight, X } from "lucide-react";
 
 interface Item {
   item: string;
@@ -26,18 +26,27 @@ interface Pedido {
 const COLUNAS: { status: string; label: string; headerColor: string; borderColor: string }[] = [
   { status: "novo",          label: "🆕 Novos",      headerColor: "bg-blue-50",   borderColor: "border-blue-200" },
   { status: "em_separacao",  label: "📦 Separação",  headerColor: "bg-yellow-50", borderColor: "border-yellow-200" },
-  { status: "saindo",        label: "🛵 Saindo",      headerColor: "bg-orange-50", borderColor: "border-orange-200" },
-  { status: "concluido",     label: "✅ Concluído",   headerColor: "bg-green-50",  borderColor: "border-green-200" },
+  { status: "saiu_para_entrega",  label: "🛵 Saindo",     headerColor: "bg-orange-50", borderColor: "border-orange-200" },
+  { status: "entregue",           label: "✅ Concluído",   headerColor: "bg-green-50",  borderColor: "border-green-200" },
   { status: "cancelado",     label: "❌ Cancelado",   headerColor: "bg-red-50",    borderColor: "border-red-200" },
 ];
 
 const BADGE_CLASS: Record<string, string> = {
   novo:         "bg-blue-100 text-blue-800",
   em_separacao: "bg-yellow-100 text-yellow-800",
-  saindo:       "bg-orange-100 text-orange-800",
-  concluido:    "bg-green-100 text-green-800",
+  saiu_para_entrega:  "bg-orange-100 text-orange-800",
+  entregue:           "bg-green-100 text-green-800",
   cancelado:    "bg-red-100 text-red-800",
 };
+
+
+const NEXT_STATUS: Record<string, { status: string; label: string }> = {
+  novo:              { status: "em_separacao",      label: "Iniciar Separação" },
+  em_separacao:      { status: "saiu_para_entrega", label: "Despachar" },
+  saiu_para_entrega: { status: "entregue",          label: "Confirmar Entrega" },
+};
+
+const CANCELABLE = ["novo", "em_separacao", "saiu_para_entrega"];
 
 function formatPhone(tel: string | null) {
   if (!tel) return null;
@@ -60,7 +69,7 @@ function isCoords(str: string) {
   return /^-?\d+\.\d+,-?\d+\.\d+$/.test(str.trim());
 }
 
-function OrderCard({ p }: { p: Pedido }) {
+function OrderCard({ p, onStatusChange }: { p: Pedido; onStatusChange: (id: string, newStatus: string) => Promise<void> }) {
   const phone = formatPhone(p.clientes?.telefone ?? null);
   const nome = p.clientes?.nome ?? "Cliente";
   const itensTexto = p.itens_pedido
@@ -73,6 +82,17 @@ function OrderCard({ p }: { p: Pedido }) {
     : p.endereco
     ? `https://maps.google.com/?q=${encodeURIComponent(p.endereco)}`
     : null;
+
+  const [updating, setUpdating] = useState(false);
+  const next = p.status ? NEXT_STATUS[p.status] : null;
+  const canCancel = p.status ? CANCELABLE.includes(p.status) : false;
+
+  async function advance(newStatus: string) {
+    setUpdating(true);
+    await onStatusChange(p.id, newStatus);
+    setUpdating(false);
+  }
+
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-3">
@@ -146,6 +166,41 @@ function OrderCard({ p }: { p: Pedido }) {
           </a>
         )}
       </div>
+
+      {/* Action buttons */}
+      {(next || canCancel) && (
+        <div className="flex gap-2 pt-1">
+          {next && (
+            <Button
+              size="sm"
+              className="flex-1 h-8 text-xs"
+              disabled={updating}
+              onClick={() => advance(next.status)}
+            >
+              {updating ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <>
+                  <ChevronRight className="w-3 h-3 mr-1" />
+                  {next.label}
+                </>
+              )}
+            </Button>
+          )}
+          {canCancel && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs text-red-500 border-red-200 hover:bg-red-50"
+              disabled={updating}
+              onClick={() => advance("cancelado")}
+            >
+              <X className="w-3 h-3" />
+            </Button>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
@@ -167,6 +222,11 @@ export default function Pedidos() {
     setPedidos((data as unknown as Pedido[]) ?? []);
     setLoading(false);
     setRefreshing(false);
+  }
+
+  async function handleStatusChange(id: string, newStatus: string) {
+    await externalSupabase.from("pedidos").update({ status: newStatus }).eq("id", id);
+    setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
   }
 
   useEffect(() => {
@@ -221,7 +281,7 @@ export default function Pedidos() {
                 {items.length === 0 ? (
                   <p className="text-center text-xs text-gray-400 py-6">Nenhum pedido</p>
                 ) : (
-                  items.map((p) => <OrderCard key={p.id} p={p} />)
+                  items.map((p) => <OrderCard key={p.id} p={p} onStatusChange={handleStatusChange} />)
                 )}
               </div>
             </div>
