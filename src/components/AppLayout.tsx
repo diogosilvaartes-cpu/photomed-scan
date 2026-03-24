@@ -1,6 +1,6 @@
 import { ReactNode, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Package, Users, Truck, LogOut, Menu, X, FlaskConical } from "lucide-react";
+import { Package, Users, Truck, LogOut, Menu, X, FlaskConical, ClipboardList } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,9 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: "/", icon: <FlaskConical className="w-5 h-5" />, label: "Estoque", adminOnly: true },
+  { to: "/", icon: <FlaskConical className="w-5 h-5" />, label: "Scan", adminOnly: true },
+  { to: "/estoque", icon: <Package className="w-5 h-5" />, label: "Estoque", adminOnly: true },
+  { to: "/pedidos", icon: <ClipboardList className="w-5 h-5" />, label: "Pedidos", adminOnly: true },
   { to: "/clientes", icon: <Users className="w-5 h-5" />, label: "Clientes", adminOnly: true },
   { to: "/entregas", icon: <Truck className="w-5 h-5" />, label: "Entregas" },
 ];

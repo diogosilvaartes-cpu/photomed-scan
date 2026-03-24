@@ -7,6 +7,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import AppLayout from "@/components/AppLayout";
 import Index from "./pages/Index.tsx";
+import Estoque from "./pages/Estoque.tsx";
+import Pedidos from "./pages/Pedidos.tsx";
 import Login from "./pages/Login.tsx";
 import Clientes from "./pages/Clientes.tsx";
 import Entregas from "./pages/Entregas.tsx";
@@ -41,30 +43,11 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute adminOnly>
-            <Index />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/clientes"
-        element={
-          <ProtectedRoute adminOnly>
-            <Clientes />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/entregas"
-        element={
-          <ProtectedRoute>
-            <Entregas />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/" element={<ProtectedRoute adminOnly><Index /></ProtectedRoute>} />
+      <Route path="/estoque" element={<ProtectedRoute adminOnly><Estoque /></ProtectedRoute>} />
+      <Route path="/pedidos" element={<ProtectedRoute adminOnly><Pedidos /></ProtectedRoute>} />
+      <Route path="/clientes" element={<ProtectedRoute adminOnly><Clientes /></ProtectedRoute>} />
+      <Route path="/entregas" element={<ProtectedRoute><Entregas /></ProtectedRoute>} />
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
       <Route path="*" element={<NotFound />} />
     </Routes>
