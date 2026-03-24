@@ -130,9 +130,11 @@ export default function MedScanForm() {
         description: "Verifique os dados e edite se necessário.",
       });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[MedScan] Erro ao ler produto:", msg);
       toast({
         title: "Erro ao ler produto",
-        description: "Não foi possível identificar o medicamento. Preencha manualmente.",
+        description: msg.length < 120 ? msg : "Não foi possível identificar o medicamento. Preencha manualmente.",
         variant: "destructive",
       });
     } finally {
