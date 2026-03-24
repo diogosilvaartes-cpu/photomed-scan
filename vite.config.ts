@@ -20,7 +20,8 @@ export default defineConfig(({ mode }) => ({
     react(),
     mode === "development" && componentTagger(),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
+      selfDestroying: true,
       workbox: {
         skipWaiting: true,
         clientsClaim: true,
