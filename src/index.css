@@ -94,8 +94,18 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
     font-family: 'Inter', sans-serif;
+    /* Checker background — alternating squares ~50% darker than the base */
+    background-color: hsl(210 30% 88%);
+    background-image:
+      linear-gradient(45deg, hsl(210 30% 82%) 25%, transparent 25%),
+      linear-gradient(-45deg, hsl(210 30% 82%) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, hsl(210 30% 82%) 75%),
+      linear-gradient(-45deg, transparent 75%, hsl(210 30% 82%) 75%);
+    background-size: 32px 32px;
+    background-position: 0 0, 0 16px, 16px -16px, -16px 0px;
+    background-attachment: fixed;
   }
 }
 

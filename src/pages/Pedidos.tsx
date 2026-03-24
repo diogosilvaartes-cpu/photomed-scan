@@ -146,7 +146,7 @@ function OrderCard({
   }
 
   return (
-    <div className={cn("bg-white rounded-2xl border-l-4 shadow-sm overflow-hidden border border-gray-100", col.cardAccent)}>
+    <div className={cn("rounded-2xl border-l-4 shadow-md overflow-hidden border border-white/60", col.bgLight, col.cardAccent)}>
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -251,7 +251,6 @@ export default function Pedidos() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState("novo");
 
   async function load(silent = false) {
     if (!silent) setLoading(true);
@@ -276,8 +275,7 @@ export default function Pedidos() {
     return () => clearInterval(interval);
   }, []);
 
-  const byStatus = (status: string) => pedidos.filter((p) => p.status === status);
-  const activeCol = COLUNAS.find((c) => c.status === activeTab)!;
+  const byStatus = (status: string) => pedidos.filter((p) => p.status === status);;
 
   if (loading) {
     return (
@@ -303,64 +301,20 @@ export default function Pedidos() {
           </button>
         </div>
 
-        {/* Pills de status */}
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4" style={{ scrollbarWidth: "none" }}>
-          {COLUNAS.map((col) => {
-            const count = byStatus(col.status).length;
-            const isActive = activeTab === col.status;
-            return (
-              <button
-                key={col.status}
-                onClick={() => setActiveTab(col.status)}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold shrink-0 transition-all",
-                  isActive ? cn(col.bg, "text-white shadow-md") : "bg-secondary text-muted-foreground hover:bg-secondary/80"
-                )}
-              >
-                <span>{col.emoji}</span>
-                <span>{col.label}</span>
-                {count > 0 && (
-                  <span className={cn(
-                    "text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center",
-                    isActive ? "bg-white/30" : col.badge
-                  )}>
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
-      {/* Conteúdo */}
-      <div className="flex-1 overflow-y-auto">
-
-        {/* Mobile: lista vertical */}
-        <div className="md:hidden p-4 space-y-3">
-          {byStatus(activeTab).length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-              <span className="text-5xl mb-3">{activeCol.emoji}</span>
-              <p className="text-base font-medium">Nenhum pedido aqui</p>
-            </div>
-          ) : (
-            byStatus(activeTab).map((p) => (
-              <OrderCard key={p.id} p={p} col={activeCol} onStatusChange={handleStatusChange} />
-            ))
-          )}
-        </div>
-
-        {/* Desktop: kanban */}
-        <div className="hidden md:flex gap-4 p-5 overflow-x-auto items-start min-h-full">
+      {/* Kanban — horizontal em todos os tamanhos */}
+      <div className="flex-1 overflow-x-auto overflow-y-hidden">
+        <div className="flex gap-4 p-4 items-start min-h-full" style={{ minWidth: "max-content" }}>
           {COLUNAS.map((col) => {
             const items = byStatus(col.status);
             return (
-              <div key={col.status} className="flex-shrink-0 w-80 flex flex-col gap-3">
+              <div key={col.status} className="flex-shrink-0 w-72 sm:w-80 flex flex-col gap-3">
                 <div className={cn("flex items-center justify-between px-4 py-2.5 rounded-xl", col.bgLight)}>
                   <span className={cn("font-bold text-base", col.text)}>{col.emoji} {col.label}</span>
                   <span className={cn("text-xs font-bold px-2 py-0.5 rounded-full", col.badge)}>{items.length}</span>
                 </div>
-                <div className="flex flex-col gap-3 max-h-[calc(100vh-220px)] overflow-y-auto">
+                <div className="flex flex-col gap-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-0.5">
                   {items.length === 0 ? (
                     <p className="text-center text-sm text-muted-foreground py-10">Nenhum pedido</p>
                   ) : (
