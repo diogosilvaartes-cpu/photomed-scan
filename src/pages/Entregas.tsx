@@ -2,7 +2,8 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Truck, User, MapPin, Phone, Package, Loader2,
-  CheckCircle, Clock, ChevronDown, Navigation, Settings, KeyRound
+  CheckCircle, Clock, ChevronDown, Navigation, Settings, KeyRound,
+  LocateFixed, LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +56,9 @@ type DespachoEntrega = {
   observacao: string | null;
   enviado_em: string;
   entregue_em: string | null;
+  saiu_em: string | null;
+  chegou_em: string | null;
+  localizacao: string | null;
 };
 
 type PedidoEntrega = {
@@ -310,12 +314,47 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   const nomeCliente = pedido.clientes?.nome ?? pedido.clientes?.telefone ?? "—";
   const telefone = pedido.clientes?.telefone ?? "";
 
+  const saiu = !!despacho?.saiu_em;
+  const chegou = !!despacho?.chegou_em;
+  const entregue = pedido.status === "entregue";
+
+  const sairParaEntrega = useMutation({
+    mutationFn: async () => {
+      if (!despacho) return;
+      const { error } = await externalSupabase
+        .from("despacho_entrega")
+        .update({ saiu_em: new Date().toISOString() })
+        .eq("id", despacho.id);
+      if (error) throw error;
+      await externalSupabase.from("pedidos").update({ status: "saiu_para_entrega" }).eq("id", pedido.id);
+    },
+    onSuccess: () => {
+      toast({ title: "Saiu para entrega!" });
+      qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
+    },
+    onError: () => toast({ title: "Erro", variant: "destructive" }),
+  });
+
+  const chegarAoLocal = useMutation({
+    mutationFn: async () => {
+      if (!despacho) return;
+      const { error } = await externalSupabase
+        .from("despacho_entrega")
+        .update({ chegou_em: new Date().toISOString() })
+        .eq("id", despacho.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({ title: "Chegada registrada!" });
+      qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
+    },
+    onError: () => toast({ title: "Erro", variant: "destructive" }),
+  });
+
   const marcarEntregue = useMutation({
     mutationFn: async () => {
       const { error } = await externalSupabase
-        .from("pedidos")
-        .update({ status: "entregue" })
-        .eq("id", pedido.id);
+        .from("pedidos").update({ status: "entregue" }).eq("id", pedido.id);
       if (error) throw error;
       if (despacho) {
         await externalSupabase
@@ -325,10 +364,34 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
       }
     },
     onSuccess: () => {
-      toast({ title: "Marcado como entregue!" });
+      toast({ title: "Entrega confirmada!" });
       qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
     },
-    onError: () => toast({ title: "Erro ao atualizar", variant: "destructive" }),
+    onError: () => toast({ title: "Erro", variant: "destructive" }),
+  });
+
+  const compartilharLocalizacao = useMutation({
+    mutationFn: async () => {
+      if (!despacho) throw new Error("Sem despacho");
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 })
+      );
+      const localizacao = `${pos.coords.latitude},${pos.coords.longitude}`;
+      const { error } = await externalSupabase
+        .from("despacho_entrega")
+        .update({ localizacao })
+        .eq("id", despacho.id);
+      if (error) throw error;
+      return localizacao;
+    },
+    onSuccess: (loc) => {
+      toast({ title: "Localização salva!", description: loc });
+      qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Erro";
+      toast({ title: "Não foi possível obter localização", description: msg, variant: "destructive" });
+    },
   });
 
   const mapsUrl = pedido.endereco
@@ -337,9 +400,13 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
       : `https://maps.google.com/?q=${encodeURIComponent(pedido.endereco)}`
     : null;
   const wppUrl = telefone ? `https://wa.me/${telefone.replace(/\D/g, "")}` : null;
+  const locMapsUrl = despacho?.localizacao
+    ? `https://maps.google.com/?q=${despacho.localizacao}`
+    : null;
 
   return (
     <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+      {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-foreground">{nomeCliente}</p>
@@ -350,6 +417,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         )}
       </div>
 
+      {/* Endereço */}
       {pedido.endereco && (
         <div className="flex items-start gap-2 bg-secondary rounded-lg px-3 py-2">
           <MapPin className="w-4 h-4 text-primary shrink-0 mt-0.5" />
@@ -357,13 +425,14 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         </div>
       )}
 
+      {/* Itens */}
       {pedido.itens_pedido.length > 0 && (
         <ul className="text-sm text-muted-foreground space-y-0.5">
           {pedido.itens_pedido.map((item, i) => <li key={i}>×{item.quantidade} {item.item}</li>)}
         </ul>
       )}
 
-      {/* Ações de acesso rápido */}
+      {/* Links rápidos */}
       <div className="flex gap-2">
         {mapsUrl && (
           <a href={mapsUrl} target="_blank" rel="noreferrer"
@@ -379,14 +448,62 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         )}
       </div>
 
-      <Button className="w-full" onClick={() => marcarEntregue.mutate()}
-        disabled={marcarEntregue.isPending || pedido.status === "entregue"}>
-        {marcarEntregue.isPending
-          ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Atualizando...</>
-          : pedido.status === "entregue"
-            ? <><CheckCircle className="w-4 h-4 mr-2" />Entregue</>
-            : <><CheckCircle className="w-4 h-4 mr-2" />Marcar como entregue</>}
-      </Button>
+      {/* Localização registrada */}
+      {despacho?.localizacao && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary rounded-lg px-3 py-2">
+          <LocateFixed className="w-3.5 h-3.5 text-green-600 shrink-0" />
+          <span className="flex-1">Localização registrada</span>
+          {locMapsUrl && (
+            <a href={locMapsUrl} target="_blank" rel="noreferrer" className="text-primary font-medium">Ver</a>
+          )}
+        </div>
+      )}
+
+      {/* Botões de ação */}
+      <div className="space-y-2">
+        {!entregue && !saiu && (
+          <Button className="w-full" variant="outline"
+            onClick={() => sairParaEntrega.mutate()}
+            disabled={sairParaEntrega.isPending}>
+            {sairParaEntrega.isPending
+              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              : <LogOut className="w-4 h-4 mr-2" />}
+            Sair para entrega
+          </Button>
+        )}
+
+        {saiu && !chegou && !entregue && (
+          <Button className="w-full" variant="outline"
+            onClick={() => chegarAoLocal.mutate()}
+            disabled={chegarAoLocal.isPending}>
+            {chegarAoLocal.isPending
+              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              : <MapPin className="w-4 h-4 mr-2" />}
+            Cheguei ao local
+          </Button>
+        )}
+
+        {!entregue && (
+          <Button className="w-full" variant="outline"
+            onClick={() => compartilharLocalizacao.mutate()}
+            disabled={compartilharLocalizacao.isPending}>
+            {compartilharLocalizacao.isPending
+              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              : <LocateFixed className="w-4 h-4 mr-2" />}
+            {despacho?.localizacao ? "Atualizar localização" : "Compartilhar localização"}
+          </Button>
+        )}
+
+        <Button className="w-full"
+          onClick={() => marcarEntregue.mutate()}
+          disabled={marcarEntregue.isPending || entregue}>
+          {marcarEntregue.isPending
+            ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Atualizando...</>
+            : entregue
+              ? <><CheckCircle className="w-4 h-4 mr-2" />Entregue</>
+              : <><CheckCircle className="w-4 h-4 mr-2" />Marcar como entregue</>}
+        </Button>
+      </div>
     </div>
   );
 }
