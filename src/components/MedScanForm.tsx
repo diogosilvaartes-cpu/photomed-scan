@@ -157,7 +157,7 @@ export default function MedScanForm() {
     }
     setSaving(true);
     try {
-      const { error } = await externalSupabase.from("medicamentos").insert({
+      const { error } = await externalSupabase.from("estoque").insert({
         nome: form.name,
         laboratorio: form.lab,
         dosagem: form.dosage,
