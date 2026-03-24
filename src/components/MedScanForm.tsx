@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { externalSupabase } from "@/integrations/supabase/external-client";
+const SUPABASE_URL = "https://pkyhdtaevvyziitpbkib.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBreWhkdGFldnZ5emlpdHBia2liIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2Njk2MDksImV4cCI6MjA4OTI0NTYwOX0.yPbpoWjPuz6fTAm-JpjymWzdXA8b6TbBelP1i4s1OJg";
 
 // Comprime e redimensiona imagem para máx 1024px, JPEG quality 0.82 (~< 300KB)
 async function compressImage(file: File): Promise<{ base64: string; mimeType: string }> {
@@ -157,22 +158,27 @@ export default function MedScanForm() {
     }
     setSaving(true);
     try {
-      const { error } = await externalSupabase.from("estoque").insert({
-        nome: form.name,
-        laboratorio: form.lab,
-        dosagem: form.dosage,
-        forma: form.pharmaForm,
-        quantidade: Number(form.quantity),
-        lote: form.batch || null,
-        validade: form.expiry || null,
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/estoque`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_ANON,
+          "Authorization": `Bearer ${SUPABASE_ANON}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal",
+        },
+        body: JSON.stringify({
+          nome: form.name,
+          laboratorio: form.lab,
+          dosagem: form.dosage,
+          forma: form.pharmaForm,
+          quantidade: Number(form.quantity) || 0,
+          lote: form.batch || null,
+          validade: form.expiry || null,
+        }),
       });
-      if (error) {
-        toast({
-          title: "Erro ao salvar",
-          description: error.message,
-          variant: "destructive",
-        });
-        return;
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`${res.status}: ${errText}`);
       }
       setSaved(true);
       toast({
