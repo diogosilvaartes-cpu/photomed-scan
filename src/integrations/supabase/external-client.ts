@@ -10,3 +10,15 @@ export const externalSupabase = createClient(EXTERNAL_SUPABASE_URL, EXTERNAL_SUP
     autoRefreshToken: true,
   },
 });
+
+// Cria um cliente isolado (sem persistência de sessão) para criar usuários Auth
+// sem afetar a sessão do admin logado.
+export function createTempAuthClient() {
+  return createClient(EXTERNAL_SUPABASE_URL, EXTERNAL_SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}

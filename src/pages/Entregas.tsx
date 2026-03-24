@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Truck, User, MapPin, Phone, Package, Loader2,
-  CheckCircle, Clock, ChevronDown, Navigation
+  CheckCircle, Clock, ChevronDown, Navigation, Settings, KeyRound
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,8 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { externalSupabase } from "@/integrations/supabase/external-client";
+import { externalSupabase, createTempAuthClient } from "@/integrations/supabase/external-client";
 import { useAuth } from "@/lib/auth";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -40,7 +46,7 @@ const PROXIMOS_STATUS: Record<string, string[]> = {
   saiu_para_entrega: ["entregue"],
 };
 
-type Entregador = { id: string; nome: string; ativo: boolean };
+type Entregador = { id: string; nome: string; telefone: string; ativo: boolean; user_id: string | null };
 
 type DespachoEntrega = {
   id: string;
@@ -102,8 +108,7 @@ async function fetchEntregasEntregador(entregadorId: string): Promise<PedidoEntr
 async function fetchEntregadores(): Promise<Entregador[]> {
   const { data, error } = await externalSupabase
     .from("entregadores")
-    .select("id, nome, ativo")
-    .eq("ativo", true)
+    .select("id, nome, telefone, ativo, user_id")
     .order("nome");
   if (error) throw error;
   return data ?? [];
@@ -386,8 +391,177 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   );
 }
 
+function EntregadoresModal({
+  open,
+  onClose,
+  entregadores,
+}: {
+  open: boolean;
+  onClose: () => void;
+  entregadores: Entregador[];
+}) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [ativo, setAtivo] = useState<Entregador | null>(null);
+  const [pin, setPin] = useState(["", "", "", ""]);
+  const [loading, setLoading] = useState(false);
+  const pinRefs = [
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+  ];
+
+  function abrirPin(e: Entregador) {
+    setAtivo(e);
+    setPin(["", "", "", ""]);
+    setTimeout(() => pinRefs[0].current?.focus(), 100);
+  }
+
+  function handlePinChange(index: number, value: string) {
+    const digit = value.replace(/\D/g, "").slice(-1);
+    const newPin = [...pin];
+    newPin[index] = digit;
+    setPin(newPin);
+    if (digit && index < 3) pinRefs[index + 1].current?.focus();
+  }
+
+  function handlePinKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Backspace" && !pin[index] && index > 0) pinRefs[index - 1].current?.focus();
+  }
+
+  async function salvarLogin() {
+    if (!ativo) return;
+    const pinStr = pin.join("");
+    if (pinStr.length < 4) {
+      toast({ title: "PIN incompleto", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    try {
+      const email = `${ativo.telefone.replace(/\D/g, "")}@farmaciavital.internal`;
+      const tempClient = createTempAuthClient();
+
+      if (ativo.user_id) {
+        // Redefinir PIN: usar Admin API não está disponível no anon key.
+        // Alternativa: deletar e recriar via signUp (só funciona se o user não existe mais)
+        // Por segurança, avisamos que o reset deve ser feito pelo Supabase Dashboard.
+        toast({
+          title: "Redefinição de PIN",
+          description: "Para redefinir o PIN, acesse o Supabase Dashboard → Authentication → Users e altere a senha do usuário.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Criar novo usuário Auth
+      const { data, error } = await tempClient.auth.signUp({ email, password: pinStr });
+      if (error) throw new Error(error.message);
+      if (!data.user) throw new Error("Usuário não retornado pelo Supabase.");
+
+      // Vincular user_id na tabela entregadores
+      const { error: upErr } = await externalSupabase
+        .from("entregadores")
+        .update({ user_id: data.user.id })
+        .eq("id", ativo.id);
+      if (upErr) throw new Error(upErr.message);
+
+      toast({ title: `Login criado para ${ativo.nome}!` });
+      qc.invalidateQueries({ queryKey: ["entregadores"] });
+      setAtivo(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro desconhecido";
+      toast({ title: "Erro ao criar login", description: msg, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setAtivo(null); } }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Entregadores</DialogTitle>
+        </DialogHeader>
+
+        {!ativo ? (
+          <div className="space-y-2">
+            {entregadores.map((e) => (
+              <div key={e.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-secondary/40">
+                <div>
+                  <p className="text-sm font-medium">{e.nome}</p>
+                  <p className="text-xs text-muted-foreground">{e.telefone}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {e.user_id ? (
+                    <>
+                      <span className="text-xs text-green-600 font-medium">● Ativo</span>
+                      <Button size="sm" variant="ghost" onClick={() => abrirPin(e)}>
+                        <KeyRound className="w-3.5 h-3.5" />
+                      </Button>
+                    </>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => abrirPin(e)}>
+                      Criar login
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm font-semibold">{ativo.nome}</p>
+              <p className="text-xs text-muted-foreground">{ativo.telefone}</p>
+            </div>
+            {ativo.user_id ? (
+              <p className="text-sm text-muted-foreground">
+                Para redefinir o PIN, acesse o <strong>Supabase Dashboard → Authentication → Users</strong> e altere a senha do usuário.
+              </p>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <p className="text-sm font-medium">Defina um PIN de 4 dígitos</p>
+                  <div className="flex gap-3 justify-center">
+                    {pin.map((digit, i) => (
+                      <input
+                        key={i}
+                        ref={pinRefs[i]}
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={9}
+                        value={digit}
+                        onChange={(e) => handlePinChange(i, e.target.value)}
+                        onKeyDown={(e) => handlePinKeyDown(i, e)}
+                        className="w-12 h-14 text-center text-xl font-bold rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" className="flex-1" onClick={() => setAtivo(null)}>Voltar</Button>
+                  <Button className="flex-1" onClick={salvarLogin} disabled={loading}>
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Salvar"}
+                  </Button>
+                </div>
+              </>
+            )}
+            {ativo.user_id && (
+              <Button variant="outline" className="w-full" onClick={() => setAtivo(null)}>Voltar</Button>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Entregas() {
   const { role, entregadorId, entregadorNome } = useAuth();
+  const [entregadoresOpen, setEntregadoresOpen] = useState(false);
 
   const { data: pedidos, isLoading } = useQuery({
     queryKey: role === "admin" ? ["entregas-admin"] : ["entregas-entregador", entregadorId],
@@ -403,6 +577,8 @@ export default function Entregas() {
     queryFn: fetchEntregadores,
     enabled: role === "admin",
   });
+
+  const entregadoresAtivos = (entregadores ?? []).filter((e) => e.ativo);
 
   if (isLoading) {
     return (
@@ -437,10 +613,26 @@ export default function Entregas() {
               : `${emAndamento.length} entrega(s) em andamento`}
           </p>
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock className="w-3.5 h-3.5" /><span>Atualiza a cada 30s</span>
+        <div className="flex items-center gap-2">
+          {role === "admin" && (
+            <Button size="sm" variant="outline" onClick={() => setEntregadoresOpen(true)}>
+              <Settings className="w-4 h-4 mr-1.5" />
+              Entregadores
+            </Button>
+          )}
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock className="w-3.5 h-3.5" /><span>30s</span>
+          </div>
         </div>
       </div>
+
+      {role === "admin" && entregadores && (
+        <EntregadoresModal
+          open={entregadoresOpen}
+          onClose={() => setEntregadoresOpen(false)}
+          entregadores={entregadores}
+        />
+      )}
 
       {pedidos?.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">
@@ -457,7 +649,7 @@ export default function Entregas() {
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 capitalize">{date}</p>
                   <div className="space-y-3">
                     {role === "admin"
-                      ? items.map((p) => <CardEntregaAdmin key={p.id} pedido={p} entregadores={entregadores ?? []} />)
+                      ? items.map((p) => <CardEntregaAdmin key={p.id} pedido={p} entregadores={entregadoresAtivos} />)
                       : items.map((p) => <CardEntregaEntregador key={p.id} pedido={p} />)}
                   </div>
                 </div>
