@@ -1,10 +1,35 @@
 import { useState, useRef } from "react";
-import { Upload, Camera, Loader2, CheckCircle, Package } from "lucide-react";
+import { Upload, Camera, Loader2, CheckCircle, Package, ImagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase } from "@/integrations/supabase/external-client";
+
+// Comprime e redimensiona imagem para máx 1024px, JPEG quality 0.82 (~< 300KB)
+async function compressImage(file: File): Promise<{ base64: string; mimeType: string }> {
+  const MAX_PX = 1024;
+  const QUALITY = 0.82;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, MAX_PX / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL("image/jpeg", QUALITY);
+      resolve({ base64: dataUrl.split(",")[1], mimeType: "image/jpeg" });
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
 
 interface MedFormData {
   name: string;
@@ -33,7 +58,8 @@ export default function MedScanForm() {
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -50,20 +76,11 @@ export default function MedScanForm() {
     if (!imageFile) return;
     setReading(true);
     try {
-      // Convert image to base64
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(",")[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(imageFile);
-      });
+      const { base64, mimeType } = await compressImage(imageFile);
 
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -72,21 +89,13 @@ export default function MedScanForm() {
               parts: [
                 {
                   inlineData: {
-                    mimeType: imageFile.type || "image/jpeg",
+                    mimeType,
                     data: base64,
                   },
                 },
                 {
-                  text: `Analise a embalagem deste medicamento e extraia as informações. Responda SOMENTE com um JSON válido, sem markdown, sem explicações, no formato:
-{
-  "name": "nome do medicamento",
-  "lab": "laboratório fabricante",
-  "dosage": "dosagem ex: 500mg",
-  "pharmaForm": "forma farmacêutica ex: Comprimido",
-  "quantity": "quantidade numérica de unidades na embalagem",
-  "batch": "número do lote ou vazio se não visível",
-  "expiry": "validade no formato YYYY-MM ou vazio se não visível"
-}`,
+                  text: `Analise a embalagem deste medicamento e extraia as informações. Responda SOMENTE com um JSON válido, sem markdown, sem explicações, sem bloco de código, no formato:
+{"name":"nome do medicamento","lab":"laboratório fabricante","dosage":"dosagem ex: 500mg","pharmaForm":"forma farmacêutica ex: Comprimido","quantity":"quantidade numérica de unidades na embalagem","batch":"número do lote ou vazio se não visível","expiry":"validade no formato YYYY-MM ou vazio se não visível"}`,
                 },
               ],
             }],
@@ -95,11 +104,17 @@ export default function MedScanForm() {
         }
       );
 
-      if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
+      if (!response.ok) {
+        const errBody = await response.text();
+        throw new Error(`Gemini ${response.status}: ${errBody}`);
+      }
 
       const data = await response.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const parsed = JSON.parse(text.trim());
+      // Extrai JSON mesmo se vier com markdown ```json ... ```
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("JSON não encontrado na resposta");
+      const parsed = JSON.parse(jsonMatch[0]);
 
       setForm({
         name: parsed.name ?? "",
@@ -167,7 +182,8 @@ export default function MedScanForm() {
     setImageFile(null);
     setForm(EMPTY_FORM);
     setSaved(false);
-    if (inputRef.current) inputRef.current.value = "";
+    if (cameraRef.current) cameraRef.current.value = "";
+    if (galleryRef.current) galleryRef.current.value = "";
   };
 
   const handleField = (key: keyof MedFormData) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -197,23 +213,33 @@ export default function MedScanForm() {
         <div>
           <Label className="text-label mb-2 block">Foto da embalagem</Label>
           {!image ? (
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              className="w-full border-2 border-dashed border-silver rounded-xl py-12 flex flex-col items-center gap-3 hover:border-medical hover:bg-medical/5 transition-colors cursor-pointer group"
-            >
-              <div className="bg-medical/10 p-4 rounded-full group-hover:bg-medical/20 transition-colors">
+            <div className="w-full border-2 border-dashed border-silver rounded-xl py-10 flex flex-col items-center gap-4">
+              <div className="bg-medical/10 p-4 rounded-full">
                 <Camera className="w-8 h-8 text-medical" />
               </div>
               <div className="text-center">
-                <p className="font-semibold text-slate-deep">Toque para enviar uma foto</p>
-                <p className="text-sm text-slate-muted mt-1">JPG, PNG ou WEBP · Máx. 10MB</p>
+                <p className="font-semibold text-slate-deep">Adicione uma foto da embalagem</p>
+                <p className="text-sm text-slate-muted mt-1">JPG, PNG ou WEBP</p>
               </div>
-              <div className="flex items-center gap-2 text-medical text-sm font-medium">
-                <Upload className="w-4 h-4" />
-                Escolher arquivo
+              <div className="flex gap-3 flex-wrap justify-center">
+                <button
+                  type="button"
+                  onClick={() => cameraRef.current?.click()}
+                  className="flex items-center gap-2 bg-medical text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-medical/90 transition-colors"
+                >
+                  <Camera className="w-4 h-4" />
+                  Tirar foto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => galleryRef.current?.click()}
+                  className="flex items-center gap-2 bg-white border border-silver text-slate-deep text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <ImagePlus className="w-4 h-4" />
+                  Enviar da galeria
+                </button>
               </div>
-            </button>
+            </div>
           ) : (
             <div className="relative rounded-xl overflow-hidden border border-silver">
               <img src={image} alt="Embalagem do medicamento" className="w-full object-cover max-h-72" />
@@ -226,11 +252,20 @@ export default function MedScanForm() {
               </button>
             </div>
           )}
+          {/* Câmera: abre câmera no mobile */}
           <input
-            ref={inputRef}
+            ref={cameraRef}
             type="file"
             accept="image/*"
             capture="environment"
+            className="hidden"
+            onChange={handleImageChange}
+          />
+          {/* Galeria: escolhe arquivo ou galeria no mobile */}
+          <input
+            ref={galleryRef}
+            type="file"
+            accept="image/*"
             className="hidden"
             onChange={handleImageChange}
           />
