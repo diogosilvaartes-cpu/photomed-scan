@@ -46,7 +46,7 @@ function AppRoutes() {
       <Route path="/" element={<ProtectedRoute adminOnly><Index /></ProtectedRoute>} />
       <Route path="/estoque" element={<ProtectedRoute adminOnly><Estoque /></ProtectedRoute>} />
       <Route path="/pedidos" element={<ProtectedRoute adminOnly><Pedidos /></ProtectedRoute>} />
-      <Route path="/clientes" element={<ProtectedRoute adminOnly><Clientes /></ProtectedRoute>} />
+      <Route path="/clientes" element={<ProtectedRoute><Clientes /></ProtectedRoute>} />
       <Route path="/entregas" element={<ProtectedRoute><Entregas /></ProtectedRoute>} />
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
       <Route path="*" element={<NotFound />} />
