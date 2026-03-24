@@ -11,8 +11,8 @@ export const externalSupabase = createClient(EXTERNAL_SUPABASE_URL, EXTERNAL_SUP
   },
 });
 
-// Converte PIN de 4 dígitos para senha válida no Supabase (mín. 6 chars)
-export const pinToPassword = (pin: string) => `fv${pin}`;
+// PIN de 4 dígitos = senha direto (Supabase configurado com mínimo 4)
+export const pinToPassword = (pin: string) => pin;
 
 // Cria um cliente isolado (sem persistência de sessão) para criar usuários Auth
 // sem afetar a sessão do admin logado.
