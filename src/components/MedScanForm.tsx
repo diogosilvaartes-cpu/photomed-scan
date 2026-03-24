@@ -149,11 +149,7 @@ export default function MedScanForm() {
     const required: (keyof MedFormData)[] = ["name", "lab", "dosage", "pharmaForm", "quantity"];
     const missing = required.filter((k) => !form[k].trim());
     if (missing.length) {
-      toast({
-        title: "Campos obrigatórios",
-        description: "Preencha Nome, Laboratório, Dosagem, Forma farmacêutica e Quantidade.",
-        variant: "destructive",
-      });
+      alert("Preencha: " + missing.join(", "));
       return;
     }
     setSaving(true);
@@ -178,20 +174,13 @@ export default function MedScanForm() {
       });
       if (!res.ok) {
         const errText = await res.text();
-        throw new Error(`${res.status}: ${errText}`);
+        alert("Erro " + res.status + ": " + errText);
+        return;
       }
       setSaved(true);
-      toast({
-        title: "Salvo no estoque!",
-        description: `${form.name} adicionado com sucesso.`,
-      });
+      alert("Salvo no estoque: " + form.name);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast({
-        title: "Erro ao salvar",
-        description: msg,
-        variant: "destructive",
-      });
+      alert("Exceção: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSaving(false);
     }
