@@ -644,39 +644,33 @@ function EntregadoresModal({
     setLoading(true);
     try {
       const email = `${ativo.telefone.replace(/\D/g, "")}@farmaciavital.internal`;
-      const tempClient = createTempAuthClient();
+      const password = pinToPassword(pinStr);
 
-      if (ativo.user_id) {
-        // Redefinir PIN: usar Admin API não está disponível no anon key.
-        // Alternativa: deletar e recriar via signUp (só funciona se o user não existe mais)
-        // Por segurança, avisamos que o reset deve ser feito pelo Supabase Dashboard.
-        toast({
-          title: "Redefinição de PIN",
-          description: "Para redefinir o PIN, acesse o Supabase Dashboard → Authentication → Users e altere a senha do usuário.",
-          variant: "destructive",
-        });
-        setLoading(false);
-        return;
+      const res = await fetch("/api/create-entregador", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, ...(ativo.user_id ? { userId: ativo.user_id } : {}) }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.msg ?? result.error ?? "Erro na API");
+
+      // Se criação (não redefinição), salva o user_id no entregador
+      if (!ativo.user_id) {
+        const newUserId = result.id;
+        if (!newUserId) throw new Error("user_id não retornado.");
+        const { error: upErr } = await externalSupabase
+          .from("entregadores")
+          .update({ user_id: newUserId })
+          .eq("id", ativo.id);
+        if (upErr) throw new Error(upErr.message);
       }
 
-      // Criar novo usuário Auth
-      const { data, error } = await tempClient.auth.signUp({ email, password: pinToPassword(pinStr) });
-      if (error) throw new Error(error.message);
-      if (!data.user) throw new Error("Usuário não retornado pelo Supabase.");
-
-      // Vincular user_id na tabela entregadores
-      const { error: upErr } = await externalSupabase
-        .from("entregadores")
-        .update({ user_id: data.user.id })
-        .eq("id", ativo.id);
-      if (upErr) throw new Error(upErr.message);
-
-      toast({ title: `Login criado para ${ativo.nome}!` });
+      toast({ title: ativo.user_id ? `PIN redefinido para ${ativo.nome}!` : `Login criado para ${ativo.nome}!` });
       qc.invalidateQueries({ queryKey: ["entregadores"] });
       setAtivo(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erro desconhecido";
-      toast({ title: "Erro ao criar login", description: msg, variant: "destructive" });
+      toast({ title: "Erro ao salvar login", description: msg, variant: "destructive" });
     } finally {
       setLoading(false);
     }
