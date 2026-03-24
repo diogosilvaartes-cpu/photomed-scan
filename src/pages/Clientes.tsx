@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, User, Phone, MapPin, ShoppingBag, MessageSquare,
@@ -333,6 +334,7 @@ function ClienteModal({ open, onClose, cliente }: { open: boolean; onClose: () =
 
 // ─── Página principal ────────────────────────────────────────────────────────
 export default function Clientes() {
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
@@ -350,6 +352,22 @@ export default function Clientes() {
     queryKey: ["clientes", debouncedSearch],
     queryFn: () => fetchClientes(debouncedSearch),
   });
+
+  // Auto-abre drawer quando ?id= está presente na URL
+  useEffect(() => {
+    const idParam = searchParams.get("id");
+    if (!idParam || !clientes) return;
+    const found = clientes.find((c) => c.id === idParam);
+    if (found) {
+      setSelectedCliente(found);
+      setDrawerOpen(true);
+    } else {
+      // Não está na lista atual (pode estar fora do limite) — busca direto
+      externalSupabase.from("clientes").select("*").eq("id", idParam).single().then(({ data }) => {
+        if (data) { setSelectedCliente(data as Cliente); setDrawerOpen(true); }
+      });
+    }
+  }, [clientes, searchParams]);
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">

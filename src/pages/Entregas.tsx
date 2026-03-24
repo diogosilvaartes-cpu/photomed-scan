@@ -93,8 +93,7 @@ async function fetchEntregasEntregador(entregadorId: string): Promise<PedidoEntr
   const { data: despachos, error: de } = await externalSupabase
     .from("despacho_entrega")
     .select("pedido_id")
-    .eq("entregador_id", entregadorId)
-    .eq("status_entrega", "despachado");
+    .eq("entregador_id", entregadorId);
   if (de) throw de;
 
   const pedidoIds = (despachos ?? []).map((d) => d.pedido_id);
