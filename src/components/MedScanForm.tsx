@@ -59,6 +59,7 @@ export default function MedScanForm() {
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -146,12 +147,14 @@ export default function MedScanForm() {
   };
 
   const handleSave = async () => {
+    setStatusMsg("▶ handleSave chamado");
     const required: (keyof MedFormData)[] = ["name", "lab", "dosage", "pharmaForm", "quantity"];
     const missing = required.filter((k) => !form[k].trim());
     if (missing.length) {
-      alert("Preencha: " + missing.join(", "));
+      setStatusMsg("❌ Campos vazios: " + missing.join(", "));
       return;
     }
+    setStatusMsg("⏳ Salvando...");
     setSaving(true);
     try {
       const res = await fetch(`${SUPABASE_URL}/rest/v1/estoque`, {
@@ -174,13 +177,13 @@ export default function MedScanForm() {
       });
       if (!res.ok) {
         const errText = await res.text();
-        alert("Erro " + res.status + ": " + errText);
+        setStatusMsg("❌ HTTP " + res.status + ": " + errText);
         return;
       }
       setSaved(true);
-      alert("Salvo no estoque: " + form.name);
+      setStatusMsg("✅ Salvo: " + form.name);
     } catch (err) {
-      alert("Exceção: " + (err instanceof Error ? err.message : String(err)));
+      setStatusMsg("💥 " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSaving(false);
     }
@@ -390,6 +393,13 @@ export default function MedScanForm() {
                 />
               </div>
             </div>
+
+            {/* Debug status */}
+            {statusMsg && (
+              <div style={{ background: "#1e293b", color: "#f1f5f9", padding: "10px 14px", borderRadius: 8, fontSize: 13, fontFamily: "monospace", wordBreak: "break-all" }}>
+                {statusMsg}
+              </div>
+            )}
 
             {/* Save Button */}
             <Button
