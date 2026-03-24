@@ -318,6 +318,19 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   const chegou = !!despacho?.chegou_em;
   const entregue = pedido.status === "entregue";
 
+  async function notificarCliente(msg: string) {
+    if (!telefone) return;
+    try {
+      await fetch("/api/notify-client", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: telefone.replace(/\D/g, ""), message: msg }),
+      });
+    } catch { /* notificação silenciosa — não bloqueia o fluxo */ }
+  }
+
+  const primeiroNome = nomeCliente.split(" ")[0];
+
   const sairParaEntrega = useMutation({
     mutationFn: async () => {
       if (!despacho) return;
@@ -327,6 +340,9 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         .eq("id", despacho.id);
       if (error) throw error;
       await externalSupabase.from("pedidos").update({ status: "saiu_para_entrega" }).eq("id", pedido.id);
+      await notificarCliente(
+        `Olá, ${primeiroNome}! 🛵 Seu pedido saiu para entrega. Em breve estará com você!`
+      );
     },
     onSuccess: () => {
       toast({ title: "Saiu para entrega!" });
@@ -343,6 +359,9 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         .update({ chegou_em: new Date().toISOString() })
         .eq("id", despacho.id);
       if (error) throw error;
+      await notificarCliente(
+        `Olá, ${primeiroNome}! 📍 Nosso entregador chegou ao seu endereço. Já vai chamar!`
+      );
     },
     onSuccess: () => {
       toast({ title: "Chegada registrada!" });
@@ -362,6 +381,9 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
           .update({ status_entrega: "entregue", entregue_em: new Date().toISOString() })
           .eq("id", despacho.id);
       }
+      await notificarCliente(
+        `Olá, ${primeiroNome}! ✅ Pedido entregue com sucesso! Obrigado por comprar na Farmácia Vital. 💚`
+      );
     },
     onSuccess: () => {
       toast({ title: "Entrega confirmada!" });
@@ -425,12 +447,38 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         </div>
       )}
 
-      {/* Itens */}
-      {pedido.itens_pedido.length > 0 && (
-        <ul className="text-sm text-muted-foreground space-y-0.5">
-          {pedido.itens_pedido.map((item, i) => <li key={i}>×{item.quantidade} {item.item}</li>)}
-        </ul>
-      )}
+      {/* Resumo completo do pedido */}
+      <div className="bg-secondary rounded-xl p-3 space-y-2 text-sm">
+        {pedido.itens_pedido.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Itens</p>
+            <ul className="space-y-0.5">
+              {pedido.itens_pedido.map((item, i) => (
+                <li key={i} className="flex justify-between">
+                  <span>{item.item}</span>
+                  <span className="text-muted-foreground font-medium">×{item.quantidade}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="border-t border-border pt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+          {pedido.valor_total != null && (
+            <div><span className="text-muted-foreground">Total: </span><span className="font-semibold">R$ {pedido.valor_total.toFixed(2)}</span></div>
+          )}
+          {pedido.pagamento && (
+            <div><span className="text-muted-foreground">Pagamento: </span><span className="font-medium">{pedido.pagamento}</span></div>
+          )}
+          {pedido.pessoa_recebimento && (
+            <div className="col-span-2"><span className="text-muted-foreground">Recebedor: </span><span className="font-medium">{pedido.pessoa_recebimento}</span></div>
+          )}
+        </div>
+        {pedido.resumo && (
+          <div className="border-t border-border pt-2 text-xs text-muted-foreground">
+            {pedido.resumo}
+          </div>
+        )}
+      </div>
 
       {/* Links rápidos */}
       <div className="flex gap-2">
