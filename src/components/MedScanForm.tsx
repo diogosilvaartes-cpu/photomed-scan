@@ -147,9 +147,12 @@ export default function MedScanForm() {
   };
 
   const handleSave = async () => {
-    setStatusMsg("▶ handleSave chamado");
+    setStatusMsg("1 chamado | form.name=" + JSON.stringify(form.name));
+    await new Promise(r => setTimeout(r, 50)); // força render
     const required: (keyof MedFormData)[] = ["name", "lab", "dosage", "pharmaForm", "quantity"];
     const missing = required.filter((k) => !form[k].trim());
+    setStatusMsg("2 missing=" + JSON.stringify(missing));
+    await new Promise(r => setTimeout(r, 50));
     if (missing.length) {
       setStatusMsg("❌ Campos vazios: " + missing.join(", "));
       return;
