@@ -156,29 +156,39 @@ export default function MedScanForm() {
       return;
     }
     setSaving(true);
-    const { error } = await externalSupabase.from("medications").insert({
-      name: form.name,
-      lab: form.lab,
-      dosage: form.dosage,
-      pharma_form: form.pharmaForm,
-      quantity: Number(form.quantity),
-      batch: form.batch || null,
-      expiry: form.expiry || null,
-    });
-    setSaving(false);
-    if (error) {
+    try {
+      const { error } = await externalSupabase.from("medicamentos").insert({
+        nome: form.name,
+        laboratorio: form.lab,
+        dosagem: form.dosage,
+        forma: form.pharmaForm,
+        quantidade: Number(form.quantity),
+        lote: form.batch || null,
+        validade: form.expiry || null,
+      });
+      if (error) {
+        toast({
+          title: "Erro ao salvar",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
+      setSaved(true);
+      toast({
+        title: "Salvo no estoque!",
+        description: `${form.name} adicionado com sucesso.`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       toast({
         title: "Erro ao salvar",
-        description: error.message,
+        description: msg,
         variant: "destructive",
       });
-      return;
+    } finally {
+      setSaving(false);
     }
-    setSaved(true);
-    toast({
-      title: "Salvo no estoque!",
-      description: `${form.name} adicionado com sucesso.`,
-    });
   };
 
   const handleReset = () => {
