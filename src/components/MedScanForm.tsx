@@ -78,39 +78,41 @@ export default function MedScanForm() {
     try {
       const { base64, mimeType } = await compressImage(imageFile);
 
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                {
-                  inlineData: {
-                    mimeType,
-                    data: base64,
-                  },
-                },
-                {
-                  text: `Analise a embalagem deste medicamento e extraia as informações. Responda SOMENTE com um JSON válido, sem markdown, sem explicações, sem bloco de código, no formato:
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          max_tokens: 400,
+          temperature: 0.1,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: `data:${mimeType};base64,${base64}` },
+              },
+              {
+                type: "text",
+                text: `Analise a embalagem deste medicamento e extraia as informações. Responda SOMENTE com um JSON válido, sem markdown, sem explicações, sem bloco de código, no formato:
 {"name":"nome do medicamento","lab":"laboratório fabricante","dosage":"dosagem ex: 500mg","pharmaForm":"forma farmacêutica ex: Comprimido","quantity":"quantidade numérica de unidades na embalagem","batch":"número do lote ou vazio se não visível","expiry":"validade no formato YYYY-MM ou vazio se não visível"}`,
-                },
-              ],
-            }],
-            generationConfig: { temperature: 0.1 },
-          }),
-        }
-      );
+              },
+            ],
+          }],
+        }),
+      });
 
       if (!response.ok) {
         const errBody = await response.text();
-        throw new Error(`Gemini ${response.status}: ${errBody}`);
+        throw new Error(`OpenAI ${response.status}: ${errBody}`);
       }
 
       const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const text = data.choices?.[0]?.message?.content ?? "";
       // Extrai JSON mesmo se vier com markdown ```json ... ```
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("JSON não encontrado na resposta");
