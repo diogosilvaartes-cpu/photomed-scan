@@ -147,19 +147,17 @@ export default function MedScanForm() {
   };
 
   const handleSave = async () => {
-    setStatusMsg("1 chamado | form.name=" + JSON.stringify(form.name));
-    await new Promise(r => setTimeout(r, 50)); // força render
-    const required: (keyof MedFormData)[] = ["name", "lab", "dosage", "pharmaForm", "quantity"];
-    const missing = required.filter((k) => !form[k].trim());
-    setStatusMsg("2 missing=" + JSON.stringify(missing));
-    await new Promise(r => setTimeout(r, 50));
-    if (missing.length) {
-      setStatusMsg("❌ Campos vazios: " + missing.join(", "));
-      return;
-    }
-    setStatusMsg("⏳ Salvando...");
-    setSaving(true);
     try {
+      setStatusMsg("1 form=" + JSON.stringify(form));
+      const required: (keyof MedFormData)[] = ["name", "lab", "dosage", "pharmaForm", "quantity"];
+      const missing = required.filter((k) => !String(form[k] ?? "").trim());
+      setStatusMsg("2 missing=" + JSON.stringify(missing));
+      if (missing.length) {
+        setStatusMsg("❌ Campos vazios: " + missing.join(", "));
+        return;
+      }
+      setStatusMsg("⏳ Enviando para o Supabase...");
+      setSaving(true);
       const res = await fetch(`${SUPABASE_URL}/rest/v1/estoque`, {
         method: "POST",
         headers: {
@@ -178,15 +176,14 @@ export default function MedScanForm() {
           validade: form.expiry || null,
         }),
       });
-      if (!res.ok) {
-        const errText = await res.text();
-        setStatusMsg("❌ HTTP " + res.status + ": " + errText);
-        return;
-      }
+      const status = res.status;
+      const body = await res.text();
+      setStatusMsg(`3 HTTP ${status} | body=${body}`);
+      if (!res.ok) return;
       setSaved(true);
       setStatusMsg("✅ Salvo: " + form.name);
     } catch (err) {
-      setStatusMsg("💥 " + (err instanceof Error ? err.message : String(err)));
+      setStatusMsg("💥 ERRO: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSaving(false);
     }
