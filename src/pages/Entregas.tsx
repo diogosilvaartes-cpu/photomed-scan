@@ -72,7 +72,7 @@ type PedidoEntrega = {
   pessoa_recebimento: string | null;
   created_at: string;
   updated_at: string;
-  clientes: { nome: string | null; telefone: string } | null;
+  clientes: { nome: string | null; telefone: string; observacoes: string | null; foto_url: string | null } | null;
   itens_pedido: { item: string; quantidade: number }[];
   despacho_entrega: DespachoEntrega[];
 };
@@ -102,7 +102,7 @@ async function fetchEntregasEntregador(entregadorId: string): Promise<PedidoEntr
 
   const { data, error } = await externalSupabase
     .from("pedidos")
-    .select("*, clientes(nome, telefone), itens_pedido(item, quantidade), despacho_entrega(*)")
+    .select("*, clientes(nome, telefone, observacoes, foto_url), itens_pedido(item, quantidade), despacho_entrega(*)")
     .in("id", pedidoIds)
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -426,18 +426,54 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
     ? `https://maps.google.com/?q=${despacho.localizacao}`
     : null;
 
+  // Busca imagens dos produtos no estoque
+  const itemNomes = pedido.itens_pedido.map((i) => i.item);
+  const { data: estoqueImgs } = useQuery({
+    queryKey: ["estoque-imgs", pedido.id],
+    queryFn: async () => {
+      if (!itemNomes.length) return {};
+      const { data } = await externalSupabase
+        .from("estoque").select("nome, imagem_url").in("nome", itemNomes);
+      return Object.fromEntries((data ?? []).filter(e => e.imagem_url).map(e => [e.nome, e.imagem_url]));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   return (
     <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div>
+
+      {/* Header cliente */}
+      <div className="flex items-center gap-3">
+        {pedido.clientes?.foto_url ? (
+          <img src={pedido.clientes.foto_url} alt={nomeCliente}
+            className="w-10 h-10 rounded-full object-cover shrink-0 border border-border" />
+        ) : (
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+            <User className="w-5 h-5 text-primary" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground">{nomeCliente}</p>
-          {pedido.pagamento && <p className="text-xs text-muted-foreground mt-0.5">Pagamento: {pedido.pagamento}</p>}
+          {pedido.pagamento && (
+            <p className="text-xs text-muted-foreground">Pagamento: {pedido.pagamento}</p>
+          )}
         </div>
-        {pedido.valor_total && (
-          <span className="text-base font-bold text-foreground shrink-0">R$ {pedido.valor_total.toFixed(2)}</span>
+        {/* A receber em destaque */}
+        {pedido.valor_total != null && (
+          <div className="text-right shrink-0">
+            <p className="text-xs text-muted-foreground">A receber</p>
+            <p className="text-lg font-bold text-green-600">R$ {pedido.valor_total.toFixed(2)}</p>
+          </div>
         )}
       </div>
+
+      {/* Observações do cliente */}
+      {pedido.clientes?.observacoes && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+          <span className="shrink-0 font-semibold">⚠ Obs:</span>
+          <span>{pedido.clientes.observacoes}</span>
+        </div>
+      )}
 
       {/* Endereço */}
       {pedido.endereco && (
@@ -447,16 +483,24 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         </div>
       )}
 
-      {/* Resumo completo do pedido */}
-      <div className="bg-secondary rounded-xl p-3 space-y-2 text-sm">
+      {/* Resumo completo */}
+      <div className="bg-secondary rounded-xl p-3 space-y-2">
         {pedido.itens_pedido.length > 0 && (
           <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Itens</p>
-            <ul className="space-y-0.5">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Itens</p>
+            <ul className="space-y-2">
               {pedido.itens_pedido.map((item, i) => (
-                <li key={i} className="flex justify-between">
-                  <span>{item.item}</span>
-                  <span className="text-muted-foreground font-medium">×{item.quantidade}</span>
+                <li key={i} className="flex items-center gap-3">
+                  {estoqueImgs?.[item.item] ? (
+                    <img src={estoqueImgs[item.item]} alt={item.item}
+                      className="w-10 h-10 rounded-lg object-cover border border-border shrink-0" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-background border border-border flex items-center justify-center shrink-0">
+                      <Package className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  )}
+                  <span className="flex-1 text-sm">{item.item}</span>
+                  <span className="text-sm font-semibold text-muted-foreground">×{item.quantidade}</span>
                 </li>
               ))}
             </ul>
@@ -467,33 +511,35 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
             <div><span className="text-muted-foreground">Total: </span><span className="font-semibold">R$ {pedido.valor_total.toFixed(2)}</span></div>
           )}
           {pedido.pagamento && (
-            <div><span className="text-muted-foreground">Pagamento: </span><span className="font-medium">{pedido.pagamento}</span></div>
+            <div><span className="text-muted-foreground">Pgto: </span><span className="font-medium">{pedido.pagamento}</span></div>
           )}
           {pedido.pessoa_recebimento && (
             <div className="col-span-2"><span className="text-muted-foreground">Recebedor: </span><span className="font-medium">{pedido.pessoa_recebimento}</span></div>
           )}
         </div>
         {pedido.resumo && (
-          <div className="border-t border-border pt-2 text-xs text-muted-foreground">
-            {pedido.resumo}
-          </div>
+          <div className="border-t border-border pt-2 text-xs text-muted-foreground">{pedido.resumo}</div>
         )}
       </div>
 
-      {/* Links rápidos */}
+      {/* Links rápidos + CRM */}
       <div className="flex gap-2">
         {mapsUrl && (
           <a href={mapsUrl} target="_blank" rel="noreferrer"
-            className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl text-sm font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors border border-blue-200">
+            className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors border border-blue-200">
             <Navigation className="w-4 h-4" /> Maps
           </a>
         )}
         {wppUrl && (
           <a href={wppUrl} target="_blank" rel="noreferrer"
-            className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100 transition-colors border border-green-200">
+            className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100 transition-colors border border-green-200">
             <Phone className="w-4 h-4" /> WhatsApp
           </a>
         )}
+        <a href={`/clientes?id=${pedido.cliente_id}`}
+          className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold bg-secondary text-foreground hover:bg-secondary/80 transition-colors border border-border">
+          <User className="w-4 h-4" /> CRM
+        </a>
       </div>
 
       {/* Localização registrada */}
@@ -513,20 +559,16 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
           <Button className="w-full" variant="outline"
             onClick={() => sairParaEntrega.mutate()}
             disabled={sairParaEntrega.isPending}>
-            {sairParaEntrega.isPending
-              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              : <LogOut className="w-4 h-4 mr-2" />}
+            {sairParaEntrega.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LogOut className="w-4 h-4 mr-2" />}
             Sair para entrega
           </Button>
         )}
 
-        {saiu && !chegou && !entregue && (
+        {!chegou && !entregue && (
           <Button className="w-full" variant="outline"
             onClick={() => chegarAoLocal.mutate()}
             disabled={chegarAoLocal.isPending}>
-            {chegarAoLocal.isPending
-              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              : <MapPin className="w-4 h-4 mr-2" />}
+            {chegarAoLocal.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <MapPin className="w-4 h-4 mr-2" />}
             Cheguei ao local
           </Button>
         )}
@@ -535,9 +577,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
           <Button className="w-full" variant="outline"
             onClick={() => compartilharLocalizacao.mutate()}
             disabled={compartilharLocalizacao.isPending}>
-            {compartilharLocalizacao.isPending
-              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              : <LocateFixed className="w-4 h-4 mr-2" />}
+            {compartilharLocalizacao.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LocateFixed className="w-4 h-4 mr-2" />}
             {despacho?.localizacao ? "Atualizar localização" : "Compartilhar localização"}
           </Button>
         )}
