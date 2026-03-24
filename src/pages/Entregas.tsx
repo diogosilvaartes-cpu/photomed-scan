@@ -20,7 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { externalSupabase, createTempAuthClient } from "@/integrations/supabase/external-client";
+import { externalSupabase, createTempAuthClient, pinToPassword } from "@/integrations/supabase/external-client";
 import { useAuth } from "@/lib/auth";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -456,7 +456,7 @@ function EntregadoresModal({
       }
 
       // Criar novo usuário Auth
-      const { data, error } = await tempClient.auth.signUp({ email, password: pinStr });
+      const { data, error } = await tempClient.auth.signUp({ email, password: pinToPassword(pinStr) });
       if (error) throw new Error(error.message);
       if (!data.user) throw new Error("Usuário não retornado pelo Supabase.");
 

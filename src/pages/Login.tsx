@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { externalSupabase } from "@/integrations/supabase/external-client";
+import { externalSupabase, pinToPassword } from "@/integrations/supabase/external-client";
 import { useAuth } from "@/lib/auth";
 
 export default function Login() {
@@ -59,7 +59,7 @@ export default function Login() {
     // Remove non-digits for phone numbers; keep as-is for special identifiers like "admin"
     const cleaned = /^\d+$/.test(phone.trim()) ? phone.trim().replace(/\D/g, "") : phone.trim();
     const email = `${cleaned}@farmaciavital.internal`;
-    const { error } = await externalSupabase.auth.signInWithPassword({ email, password: pinStr });
+    const { error } = await externalSupabase.auth.signInWithPassword({ email, password: pinToPassword(pinStr) });
     setLoading(false);
     if (error) {
       toast({
