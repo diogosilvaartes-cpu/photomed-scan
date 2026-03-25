@@ -222,7 +222,7 @@ function DespacharModal({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 phone: telefoneCliente.replace(/\D/g, ""),
-                message: "🚚 Seu pedido saiu para entrega! Em breve chegará até você.",
+                message: "🚚 Seu pedido saiu pra entrega!",
               }),
             });
           } catch { /* notificação silenciosa */ }
@@ -886,12 +886,6 @@ export default function Pedidos() {
     setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
 
     const pedido = pedidos.find((p) => p.id === id);
-    const telefoneCliente = pedido?.clientes?.telefone;
-    if (telefoneCliente) {
-      if (newStatus === "em_separacao") {
-        notifyWhatsApp(telefoneCliente, "🏥 Seu pedido está sendo separado! Logo sairá para entrega.");
-      }
-    }
   }
 
   async function handleConfirmarEntrega(id: string) {
@@ -908,7 +902,7 @@ export default function Pedidos() {
 
     const telefoneCliente = pedido?.clientes?.telefone;
     if (telefoneCliente) {
-      notifyWhatsApp(telefoneCliente, "✅ Seu pedido foi entregue! Obrigado pela preferência. 🙏");
+      notifyWhatsApp(telefoneCliente, "✅ Chegou!");
     }
   }
 
