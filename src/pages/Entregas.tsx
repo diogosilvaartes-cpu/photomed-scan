@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Truck, User, MapPin, Phone, Package, Loader2,
@@ -931,7 +932,7 @@ export default function Entregas() {
     queryFn: role === "admin"
       ? fetchEntregasAdmin
       : () => fetchEntregasEntregador(entregadorId!),
-    enabled: role === "admin" || !!entregadorId,
+    enabled: role !== "admin" && (!!entregadorId),
     refetchInterval: 30_000,
   });
 
@@ -942,6 +943,9 @@ export default function Entregas() {
   });
 
   const entregadoresAtivos = (entregadores ?? []).filter((e) => e.ativo);
+
+  // Admin vai para Pedidos (após todos os hooks)
+  if (role === "admin") return <Navigate to="/pedidos" replace />;
 
   if (isLoading) {
     return (

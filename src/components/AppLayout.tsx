@@ -10,6 +10,7 @@ interface NavItem {
   icon: ReactNode;
   label: string;
   adminOnly?: boolean;
+  entregadorOnly?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -18,12 +19,16 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/estoque", icon: <Package className="w-5 h-5" />, label: "Estoque", adminOnly: true },
   { to: "/pedidos", icon: <ClipboardList className="w-5 h-5" />, label: "Pedidos", adminOnly: true },
   { to: "/clientes", icon: <Users className="w-5 h-5" />, label: "Clientes" },
-  { to: "/entregas", icon: <Truck className="w-5 h-5" />, label: "Entregas" },
+  { to: "/entregas", icon: <Truck className="w-5 h-5" />, label: "Entregas", entregadorOnly: true },
 ];
 
 function NavItems({ onClick }: { onClick?: () => void }) {
   const { role } = useAuth();
-  const items = NAV_ITEMS.filter((i) => !i.adminOnly || role === "admin");
+  const items = NAV_ITEMS.filter((i) => {
+    if (i.adminOnly && role !== "admin") return false;
+    if (i.entregadorOnly && role === "admin") return false;
+    return true;
+  });
 
   return (
     <nav className="flex flex-col gap-1 px-2">
