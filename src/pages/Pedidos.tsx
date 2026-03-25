@@ -247,10 +247,20 @@ function OrderCard({
   );
 }
 
+const TODOS_STATUS = COLUNAS.map((c) => c.status);
+const STATUS_ATIVOS_DEFAULT = ["novo", "em_separacao", "saiu_para_entrega"];
+
 export default function Pedidos() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [filtros, setFiltros] = useState<string[]>(STATUS_ATIVOS_DEFAULT);
+
+  function toggleFiltro(status: string) {
+    setFiltros((prev) =>
+      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
+    );
+  }
 
   async function load(silent = false) {
     if (!silent) setLoading(true);
@@ -303,10 +313,30 @@ export default function Pedidos() {
 
       </div>
 
+      {/* Filtros */}
+      <div className="px-4 pb-3 flex flex-wrap gap-2">
+        {COLUNAS.map((col) => (
+          <button
+            key={col.status}
+            onClick={() => toggleFiltro(col.status)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
+              filtros.includes(col.status)
+                ? `${col.badge} border-transparent`
+                : "bg-background text-muted-foreground border-border"
+            )}>
+            {col.emoji} {col.label}
+            <span className={cn("ml-0.5 font-bold", filtros.includes(col.status) ? "opacity-80" : "")}>
+              {byStatus(col.status).length}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* Kanban — horizontal em todos os tamanhos */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden">
         <div className="flex gap-4 p-4 items-start min-h-full" style={{ minWidth: "max-content" }}>
-          {COLUNAS.map((col) => {
+          {COLUNAS.filter((col) => filtros.includes(col.status)).map((col) => {
             const items = byStatus(col.status);
             return (
               <div key={col.status} className="flex-shrink-0 w-72 sm:w-80 flex flex-col gap-3">

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Truck, User, MapPin, Phone, Package, Loader2,
@@ -19,7 +19,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase, createTempAuthClient, pinToPassword } from "@/integrations/supabase/external-client";
 import { useAuth } from "@/lib/auth";
@@ -49,6 +52,8 @@ const PROXIMOS_STATUS: Record<string, string[]> = {
 
 type Entregador = { id: string; nome: string; telefone: string; ativo: boolean; user_id: string | null };
 
+type ItemPagamento = { forma: string; valor: number };
+
 type DespachoEntrega = {
   id: string;
   entregador_id: string | null;
@@ -59,6 +64,7 @@ type DespachoEntrega = {
   saiu_em: string | null;
   chegou_em: string | null;
   localizacao: string | null;
+  pagamento_recebido: ItemPagamento[] | null;
 };
 
 type PedidoEntrega = {
@@ -369,15 +375,41 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
     onError: () => toast({ title: "Erro", variant: "destructive" }),
   });
 
+  const [pagamentoOpen, setPagamentoOpen] = useState(false);
+  const [pagItems, setPagItems] = useState<ItemPagamento[]>([]);
+  const [pagForma, setPagForma] = useState("Dinheiro");
+  const [pagValor, setPagValor] = useState("");
+
+  useEffect(() => {
+    if (pagamentoOpen) {
+      setPagItems(despacho?.pagamento_recebido ?? []);
+      setPagForma("Dinheiro");
+      setPagValor(pedido.valor_total?.toFixed(2) ?? "");
+    }
+  }, [pagamentoOpen]);
+
+  function addPagItem() {
+    const v = parseFloat(pagValor.replace(",", "."));
+    if (!v || v <= 0) return;
+    setPagItems((p) => [...p, { forma: pagForma, valor: v }]);
+    setPagValor("");
+  }
+
+  const totalPago = pagItems.reduce((s, i) => s + i.valor, 0);
+
   const marcarEntregue = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (pagamentos: ItemPagamento[]) => {
       const { error } = await externalSupabase
         .from("pedidos").update({ status: "entregue" }).eq("id", pedido.id);
       if (error) throw error;
       if (despacho) {
         await externalSupabase
           .from("despacho_entrega")
-          .update({ status_entrega: "entregue", entregue_em: new Date().toISOString() })
+          .update({
+            status_entrega: "entregue",
+            entregue_em: new Date().toISOString(),
+            pagamento_recebido: pagamentos.length ? pagamentos : null,
+          })
           .eq("id", despacho.id);
       }
       await notificarCliente(
@@ -386,6 +418,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
     },
     onSuccess: () => {
       toast({ title: "Entrega confirmada!" });
+      setPagamentoOpen(false);
       qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
     },
     onError: () => toast({ title: "Erro", variant: "destructive" }),
@@ -582,15 +615,88 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         )}
 
         <Button className="w-full"
-          onClick={() => marcarEntregue.mutate()}
+          onClick={() => !entregue && setPagamentoOpen(true)}
           disabled={marcarEntregue.isPending || entregue}>
-          {marcarEntregue.isPending
-            ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Atualizando...</>
-            : entregue
-              ? <><CheckCircle className="w-4 h-4 mr-2" />Entregue</>
-              : <><CheckCircle className="w-4 h-4 mr-2" />Marcar como entregue</>}
+          {entregue
+            ? <><CheckCircle className="w-4 h-4 mr-2" />Entregue</>
+            : <><CheckCircle className="w-4 h-4 mr-2" />Marcar como entregue</>}
         </Button>
       </div>
+
+      {/* Pagamento recebido registrado */}
+      {entregue && despacho?.pagamento_recebido?.length ? (
+        <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs space-y-0.5">
+          <p className="font-semibold text-green-800">Pagamento recebido:</p>
+          {despacho.pagamento_recebido.map((p, i) => (
+            <p key={i} className="text-green-700">{p.forma}: R$ {p.valor.toFixed(2)}</p>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Modal de pagamento */}
+      <Dialog open={pagamentoOpen} onOpenChange={setPagamentoOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirmar entrega</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            {pedido.valor_total != null && (
+              <div className="flex justify-between items-center bg-secondary rounded-xl px-4 py-3">
+                <span className="text-sm text-muted-foreground">Valor esperado</span>
+                <span className="text-lg font-bold text-foreground">R$ {pedido.valor_total.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Adicionar pagamento</Label>
+              <div className="flex gap-2">
+                <select
+                  value={pagForma}
+                  onChange={(e) => setPagForma(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm flex-1">
+                  {["Dinheiro", "Pix", "Cartão Débito", "Cartão Crédito", "Outro"].map((f) => (
+                    <option key={f}>{f}</option>
+                  ))}
+                </select>
+                <Input
+                  type="number" step="0.01" min="0"
+                  placeholder="0,00"
+                  value={pagValor}
+                  onChange={(e) => setPagValor(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addPagItem()}
+                  className="w-28" />
+                <Button type="button" size="sm" variant="outline" onClick={addPagItem}>+</Button>
+              </div>
+            </div>
+            {pagItems.length > 0 && (
+              <div className="space-y-1">
+                {pagItems.map((p, i) => (
+                  <div key={i} className="flex justify-between items-center text-sm bg-secondary rounded-lg px-3 py-1.5">
+                    <span>{p.forma}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">R$ {p.valor.toFixed(2)}</span>
+                      <button onClick={() => setPagItems((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="text-muted-foreground hover:text-destructive text-xs">✕</button>
+                    </div>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm font-semibold px-3 pt-1">
+                  <span>Total recebido</span>
+                  <span className={totalPago >= (pedido.valor_total ?? 0) ? "text-green-600" : "text-amber-600"}>
+                    R$ {totalPago.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPagamentoOpen(false)}>Cancelar</Button>
+            <Button onClick={() => marcarEntregue.mutate(pagItems)} disabled={marcarEntregue.isPending}>
+              {marcarEntregue.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+              Confirmar entrega
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

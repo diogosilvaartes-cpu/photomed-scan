@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useAuth } from "@/lib/auth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, User, Phone, MapPin, ShoppingBag, MessageSquare,
@@ -36,6 +37,7 @@ type Cliente = {
   enderecos: string[] | null;
   foto_url: string | null;
   observacoes: string | null;
+  anotacoes_entregador: string | null;
   created_at: string;
 };
 
@@ -91,8 +93,13 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { role } = useAuth();
   const [obs, setObs] = useState(cliente?.observacoes ?? "");
-  useEffect(() => { setObs(cliente?.observacoes ?? ""); }, [cliente]);
+  const [anotacoes, setAnotacoes] = useState(cliente?.anotacoes_entregador ?? "");
+  useEffect(() => {
+    setObs(cliente?.observacoes ?? "");
+    setAnotacoes(cliente?.anotacoes_entregador ?? "");
+  }, [cliente]);
 
   const { data: pedidos, isLoading } = useQuery({
     queryKey: ["pedidos-cliente", cliente?.id],
@@ -106,6 +113,15 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
       if (error) throw error;
     },
     onSuccess: () => { toast({ title: "Observações salvas" }); qc.invalidateQueries({ queryKey: ["clientes"] }); },
+    onError: () => toast({ title: "Erro ao salvar", variant: "destructive" }),
+  });
+
+  const updateAnotacoes = useMutation({
+    mutationFn: async (v: string) => {
+      const { error } = await externalSupabase.from("clientes").update({ anotacoes_entregador: v }).eq("id", cliente!.id);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast({ title: "Anotações salvas" }); qc.invalidateQueries({ queryKey: ["clientes"] }); },
     onError: () => toast({ title: "Erro ao salvar", variant: "destructive" }),
   });
 
@@ -158,11 +174,29 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
 
         <Separator className="my-4" />
 
+        {/* Observações do admin */}
+        {role === "admin" && (
+          <div className="space-y-2 mb-4">
+            <Label>Observações (admin)</Label>
+            <Textarea value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Preferências, alergias, notas..." rows={3} className="resize-none" />
+            <Button size="sm" onClick={() => updateObs.mutate(obs)} disabled={updateObs.isPending}>
+              {updateObs.isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />} Salvar
+            </Button>
+          </div>
+        )}
+        {role !== "admin" && obs && (
+          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+            <p className="font-semibold mb-0.5">Obs. farmácia:</p>
+            <p>{obs}</p>
+          </div>
+        )}
+
+        {/* Anotações do entregador */}
         <div className="space-y-2 mb-6">
-          <Label className="text-label">Observações internas</Label>
-          <Textarea value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Preferências, alergias, notas..." rows={3} className="resize-none" />
-          <Button size="sm" onClick={() => updateObs.mutate(obs)} disabled={updateObs.isPending}>
-            {updateObs.isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />} Salvar
+          <Label>Anotações do entregador</Label>
+          <Textarea value={anotacoes} onChange={(e) => setAnotacoes(e.target.value)} placeholder="Referências, dificuldades de localização, portaria, etc..." rows={3} className="resize-none" />
+          <Button size="sm" onClick={() => updateAnotacoes.mutate(anotacoes)} disabled={updateAnotacoes.isPending}>
+            {updateAnotacoes.isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />} Salvar
           </Button>
         </div>
 
