@@ -8,6 +8,13 @@ interface Item {
   quantidade: number;
 }
 
+interface ItemPagamento { forma: string; valor: number; }
+
+interface Despacho {
+  entregador_id: string | null;
+  pagamento_recebido: ItemPagamento[] | null;
+}
+
 interface Pedido {
   id: string;
   status: string | null;
@@ -20,7 +27,10 @@ interface Pedido {
   created_at: string | null;
   clientes: { nome: string | null; telefone: string | null } | null;
   itens_pedido: Item[];
+  despacho_entrega: Despacho[];
 }
+
+interface EntregadorSimples { id: string; nome: string; }
 
 const COLUNAS = [
   {
@@ -120,14 +130,20 @@ function OrderCard({
   p,
   col,
   onStatusChange,
+  entregadores,
 }: {
   p: Pedido;
   col: ColConfig;
   onStatusChange: (id: string, newStatus: string) => Promise<void>;
+  entregadores: EntregadorSimples[];
 }) {
   const phone = formatPhone(p.clientes?.telefone ?? null);
   const nome = p.clientes?.nome ?? "Cliente";
   const itens = p.itens_pedido?.filter((i) => i.item && i.item !== "[object Object]") ?? [];
+  const despacho = p.despacho_entrega?.[0] ?? null;
+  const entregadorNome = despacho?.entregador_id
+    ? entregadores.find((e) => e.id === despacho.entregador_id)?.nome ?? null
+    : null;
   const enderecoIsCoords = p.endereco ? isCoords(p.endereco) : false;
   const mapsLink = p.endereco
     ? enderecoIsCoords
@@ -214,6 +230,24 @@ function OrderCard({
             <span className="text-xl font-extrabold text-gray-900">{formatCurrency(p.valor_total)}</span>
           )}
         </div>
+
+        {/* Entregador + pagamento recebido */}
+        {entregadorNome && (
+          <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-1">
+            <Package className="w-4 h-4 shrink-0" />
+            <span>Entregador: <span className="font-medium text-gray-700">{entregadorNome}</span></span>
+          </div>
+        )}
+        {despacho?.pagamento_recebido?.length ? (
+          <div className="mt-1 flex flex-wrap gap-1">
+            <span className="text-xs text-gray-500">Recebido:</span>
+            {despacho.pagamento_recebido.map((pg, i) => (
+              <span key={i} className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                {pg.forma} R$ {pg.valor.toFixed(2)}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {/* Ações */}
@@ -252,6 +286,7 @@ const STATUS_ATIVOS_DEFAULT = ["novo", "em_separacao", "saiu_para_entrega"];
 
 export default function Pedidos() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [entregadores, setEntregadores] = useState<EntregadorSimples[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filtros, setFiltros] = useState<string[]>(STATUS_ATIVOS_DEFAULT);
@@ -265,11 +300,15 @@ export default function Pedidos() {
   async function load(silent = false) {
     if (!silent) setLoading(true);
     else setRefreshing(true);
-    const { data } = await externalSupabase
-      .from("pedidos")
-      .select("*, clientes(nome, telefone), itens_pedido(item, quantidade)")
-      .order("created_at", { ascending: false });
-    setPedidos((data as unknown as Pedido[]) ?? []);
+    const [{ data: pedidosData }, { data: entregadoresData }] = await Promise.all([
+      externalSupabase
+        .from("pedidos")
+        .select("*, clientes(nome, telefone), itens_pedido(item, quantidade), despacho_entrega(entregador_id, pagamento_recebido)")
+        .order("created_at", { ascending: false }),
+      externalSupabase.from("entregadores").select("id, nome"),
+    ]);
+    setPedidos((pedidosData as unknown as Pedido[]) ?? []);
+    setEntregadores((entregadoresData as EntregadorSimples[]) ?? []);
     setLoading(false);
     setRefreshing(false);
   }
@@ -349,7 +388,7 @@ export default function Pedidos() {
                     <p className="text-center text-sm text-muted-foreground py-10">Nenhum pedido</p>
                   ) : (
                     items.map((p) => (
-                      <OrderCard key={p.id} p={p} col={col} onStatusChange={handleStatusChange} />
+                      <OrderCard key={p.id} p={p} col={col} onStatusChange={handleStatusChange} entregadores={entregadores} />
                     ))
                   )}
                 </div>

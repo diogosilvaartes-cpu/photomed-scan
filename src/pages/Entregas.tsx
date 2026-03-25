@@ -164,6 +164,21 @@ function CardEntregaAdmin({
         });
         if (error) throw error;
       }
+      // Notificar entregador designado
+      const entregador = entregadores.find((e) => e.id === entregadorId);
+      if (entregador?.telefone) {
+        const clienteNome = pedido.clientes?.nome ?? pedido.clientes?.telefone ?? "—";
+        try {
+          await fetch("/api/notify-client", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              phone: entregador.telefone.replace(/\D/g, ""),
+              message: `🛵 Nova entrega para você!\nCliente: ${clienteNome}\nEndereço: ${pedido.endereco ?? "—"}\nValor: R$ ${pedido.valor_total?.toFixed(2) ?? "—"}\nAcesse o painel para ver os detalhes.`,
+            }),
+          });
+        } catch { /* notificação silenciosa */ }
+      }
     },
     onSuccess: () => {
       toast({ title: "Entregador atribuído" });
@@ -264,6 +279,20 @@ function CardEntregaAdmin({
               {format(new Date(pedido.created_at), "dd/MM/yy HH:mm", { locale: ptBR })}
             </div>
           </div>
+
+          {/* Pagamento recebido */}
+          {despacho?.pagamento_recebido?.length ? (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs space-y-0.5">
+              <p className="font-semibold text-green-800">Pagamento recebido pelo entregador:</p>
+              {despacho.pagamento_recebido.map((pg, i) => (
+                <p key={i} className="text-green-700">{pg.forma}: R$ {pg.valor.toFixed(2)}</p>
+              ))}
+              <p className="font-semibold text-green-800 border-t border-green-200 pt-1 mt-1">
+                Total: R$ {despacho.pagamento_recebido.reduce((s, pg) => s + pg.valor, 0).toFixed(2)}
+                {pedido.valor_total ? ` / R$ ${pedido.valor_total.toFixed(2)} esperado` : ""}
+              </p>
+            </div>
+          ) : null}
 
           {/* Entregador */}
           <div className="flex items-center gap-2">
@@ -961,29 +990,14 @@ export default function Entregas() {
             </div>
           )}
 
-          {/* Finalizadas hoje */}
+          {/* Finalizadas */}
           {finalizados.length > 0 && (
             <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">Entregues</p>
-              <div className="space-y-2">
-                {finalizados.map((p) => (
-                  <div key={p.id} className="bg-secondary rounded-xl px-4 py-2.5 flex items-center gap-3 opacity-60">
-                    <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm text-foreground truncate">
-                        {p.clientes?.nome ?? p.clientes?.telefone ?? "—"}
-                      </span>
-                      {p.endereco && (
-                        <p className="text-xs text-muted-foreground truncate">{p.endereco}</p>
-                      )}
-                    </div>
-                    {p.valor_total && (
-                      <span className="text-sm font-medium text-foreground shrink-0">
-                        R$ {p.valor_total.toFixed(2)}
-                      </span>
-                    )}
-                  </div>
-                ))}
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Entregues</p>
+              <div className="space-y-3 opacity-75">
+                {role === "admin"
+                  ? finalizados.map((p) => <CardEntregaAdmin key={p.id} pedido={p} entregadores={entregadoresAtivos} />)
+                  : finalizados.map((p) => <CardEntregaEntregador key={p.id} pedido={p} />)}
               </div>
             </div>
           )}
