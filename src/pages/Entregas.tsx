@@ -730,96 +730,129 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   );
 }
 
-function EntregadoresModal({
-  open,
-  onClose,
-  entregadores,
-}: {
-  open: boolean;
-  onClose: () => void;
-  entregadores: Entregador[];
+type ModalView = "list" | "pin" | "novo";
+
+function PinInput({ pin, setPin, pinRefs }: {
+  pin: string[];
+  setPin: (p: string[]) => void;
+  pinRefs: React.RefObject<HTMLInputElement>[];
+}) {
+  function handleChange(index: number, value: string) {
+    const digit = value.replace(/\D/g, "").slice(-1);
+    const next = [...pin]; next[index] = digit; setPin(next);
+    if (digit && index < 3) pinRefs[index + 1].current?.focus();
+  }
+  function handleKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Backspace" && !pin[index] && index > 0) pinRefs[index - 1].current?.focus();
+  }
+  return (
+    <div className="flex gap-3 justify-center">
+      {pin.map((digit, i) => (
+        <input key={i} ref={pinRefs[i]} type="number" inputMode="numeric" min={0} max={9}
+          value={digit} onChange={(e) => handleChange(i, e.target.value)} onKeyDown={(e) => handleKeyDown(i, e)}
+          className="w-12 h-14 text-center text-xl font-bold rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+      ))}
+    </div>
+  );
+}
+
+function EntregadoresModal({ open, onClose, entregadores }: {
+  open: boolean; onClose: () => void; entregadores: Entregador[];
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [view, setView] = useState<ModalView>("list");
   const [ativo, setAtivo] = useState<Entregador | null>(null);
   const [pin, setPin] = useState(["", "", "", ""]);
   const [loading, setLoading] = useState(false);
-  const pinRefs = [
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-  ];
+  // Novo entregador
+  const [novoNome, setNovoNome] = useState("");
+  const [novoTel, setNovoTel] = useState("");
+  const [novoPin, setNovoPin] = useState(["", "", "", ""]);
+
+  const pinRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
+  const novoPinRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
+
+  function resetAndClose() { onClose(); setView("list"); setAtivo(null); }
 
   function abrirPin(e: Entregador) {
-    setAtivo(e);
-    setPin(["", "", "", ""]);
+    setAtivo(e); setPin(["", "", "", ""]); setView("pin");
     setTimeout(() => pinRefs[0].current?.focus(), 100);
-  }
-
-  function handlePinChange(index: number, value: string) {
-    const digit = value.replace(/\D/g, "").slice(-1);
-    const newPin = [...pin];
-    newPin[index] = digit;
-    setPin(newPin);
-    if (digit && index < 3) pinRefs[index + 1].current?.focus();
-  }
-
-  function handlePinKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Backspace" && !pin[index] && index > 0) pinRefs[index - 1].current?.focus();
   }
 
   async function salvarLogin() {
     if (!ativo) return;
     const pinStr = pin.join("");
-    if (pinStr.length < 4) {
-      toast({ title: "PIN incompleto", variant: "destructive" });
-      return;
-    }
+    if (pinStr.length < 4) { toast({ title: "PIN incompleto", variant: "destructive" }); return; }
     setLoading(true);
     try {
       const email = `${ativo.telefone.replace(/\D/g, "")}@farmaciavital.internal`;
-      const password = pinToPassword(pinStr);
-
       const res = await fetch("/api/create-entregador", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, ...(ativo.user_id ? { userId: ativo.user_id } : {}) }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: pinToPassword(pinStr), ...(ativo.user_id ? { userId: ativo.user_id } : {}) }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.msg ?? result.error ?? "Erro na API");
-
-      // Se criação (não redefinição), salva o user_id no entregador
       if (!ativo.user_id) {
-        const newUserId = result.id;
-        if (!newUserId) throw new Error("user_id não retornado.");
-        const { error: upErr } = await externalSupabase
-          .from("entregadores")
-          .update({ user_id: newUserId })
-          .eq("id", ativo.id);
-        if (upErr) throw new Error(upErr.message);
+        if (!result.id) throw new Error("user_id não retornado.");
+        const { error } = await externalSupabase.from("entregadores").update({ user_id: result.id }).eq("id", ativo.id);
+        if (error) throw new Error(error.message);
       }
-
       toast({ title: ativo.user_id ? `PIN redefinido para ${ativo.nome}!` : `Login criado para ${ativo.nome}!` });
       qc.invalidateQueries({ queryKey: ["entregadores"] });
-      setAtivo(null);
+      setView("list"); setAtivo(null);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro desconhecido";
-      toast({ title: "Erro ao salvar login", description: msg, variant: "destructive" });
-    } finally {
-      setLoading(false);
+      toast({ title: "Erro ao salvar login", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
+    } finally { setLoading(false); }
+  }
+
+  async function cadastrarEntregador() {
+    if (!novoNome.trim() || !novoTel.trim()) {
+      toast({ title: "Nome e telefone são obrigatórios", variant: "destructive" }); return;
     }
+    setLoading(true);
+    try {
+      const tel = novoTel.replace(/\D/g, "");
+      const { data: inserted, error } = await externalSupabase
+        .from("entregadores").insert({ nome: novoNome.trim(), telefone: tel, ativo: true }).select().single();
+      if (error) throw new Error(error.message);
+
+      const pinStr = novoPin.join("");
+      if (pinStr.length === 4 && inserted) {
+        const email = `${tel}@farmaciavital.internal`;
+        const res = await fetch("/api/create-entregador", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: pinToPassword(pinStr) }),
+        });
+        const result = await res.json();
+        if (res.ok && result.id) {
+          await externalSupabase.from("entregadores").update({ user_id: result.id }).eq("id", inserted.id);
+        }
+      }
+
+      toast({ title: `${novoNome} cadastrado!` });
+      qc.invalidateQueries({ queryKey: ["entregadores"] });
+      setNovoNome(""); setNovoTel(""); setNovoPin(["", "", "", ""]);
+      setView("list");
+    } catch (err: unknown) {
+      toast({ title: "Erro ao cadastrar", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
+    } finally { setLoading(false); }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setAtivo(null); } }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) resetAndClose(); }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Entregadores</DialogTitle>
+          <DialogTitle>
+            {view === "novo" ? "Novo entregador" : view === "pin" ? (ativo?.user_id ? "Redefinir PIN" : "Criar login") : "Entregadores"}
+          </DialogTitle>
         </DialogHeader>
 
-        {!ativo ? (
+        {view === "list" && (
           <div className="space-y-2">
+            {entregadores.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">Nenhum entregador cadastrado.</p>
+            )}
             {entregadores.map((e) => (
               <div key={e.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-secondary/40">
                 <div>
@@ -827,64 +860,61 @@ function EntregadoresModal({
                   <p className="text-xs text-muted-foreground">{e.telefone}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {e.user_id ? (
-                    <>
-                      <span className="text-xs text-green-600 font-medium">● Ativo</span>
-                      <Button size="sm" variant="ghost" onClick={() => abrirPin(e)}>
-                        <KeyRound className="w-3.5 h-3.5" />
-                      </Button>
-                    </>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => abrirPin(e)}>
-                      Criar login
-                    </Button>
-                  )}
+                  {e.user_id
+                    ? <><span className="text-xs text-green-600 font-medium">● Ativo</span>
+                        <Button size="sm" variant="ghost" onClick={() => abrirPin(e)} title="Redefinir PIN"><KeyRound className="w-3.5 h-3.5" /></Button></>
+                    : <Button size="sm" variant="outline" onClick={() => abrirPin(e)}>Criar login</Button>}
                 </div>
               </div>
             ))}
+            <Button className="w-full mt-2" onClick={() => { setNovoNome(""); setNovoTel(""); setNovoPin(["","","",""]); setView("novo"); }}>
+              + Novo entregador
+            </Button>
           </div>
-        ) : (
+        )}
+
+        {view === "pin" && ativo && (
           <div className="space-y-4">
             <div>
               <p className="text-sm font-semibold">{ativo.nome}</p>
               <p className="text-xs text-muted-foreground">{ativo.telefone}</p>
             </div>
-            {ativo.user_id ? (
-              <p className="text-sm text-muted-foreground">
-                Para redefinir o PIN, acesse o <strong>Supabase Dashboard → Authentication → Users</strong> e altere a senha do usuário.
-              </p>
-            ) : (
-              <>
-                <div className="space-y-1.5">
-                  <p className="text-sm font-medium">Defina um PIN de 4 dígitos</p>
-                  <div className="flex gap-3 justify-center">
-                    {pin.map((digit, i) => (
-                      <input
-                        key={i}
-                        ref={pinRefs[i]}
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        max={9}
-                        value={digit}
-                        onChange={(e) => handlePinChange(i, e.target.value)}
-                        onKeyDown={(e) => handlePinKeyDown(i, e)}
-                        className="w-12 h-14 text-center text-xl font-bold rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="ghost" className="flex-1" onClick={() => setAtivo(null)}>Voltar</Button>
-                  <Button className="flex-1" onClick={salvarLogin} disabled={loading}>
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Salvar"}
-                  </Button>
-                </div>
-              </>
-            )}
-            {ativo.user_id && (
-              <Button variant="outline" className="w-full" onClick={() => setAtivo(null)}>Voltar</Button>
-            )}
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium">{ativo.user_id ? "Novo PIN de 4 dígitos" : "Defina um PIN de 4 dígitos"}</p>
+              <PinInput pin={pin} setPin={setPin} pinRefs={pinRefs} />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" className="flex-1" onClick={() => setView("list")}>Voltar</Button>
+              <Button className="flex-1" onClick={salvarLogin} disabled={loading}>
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Salvar"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {view === "novo" && (
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="novo-nome">Nome</Label>
+                <Input id="novo-nome" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Nome completo" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="novo-tel">Telefone (WhatsApp)</Label>
+                <Input id="novo-tel" value={novoTel} onChange={(e) => setNovoTel(e.target.value)} placeholder="5521900000000" type="tel" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>PIN de acesso (opcional)</Label>
+                <PinInput pin={novoPin} setPin={setNovoPin} pinRefs={novoPinRefs} />
+                <p className="text-xs text-muted-foreground text-center">Pode ser definido depois</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" className="flex-1" onClick={() => setView("list")}>Voltar</Button>
+              <Button className="flex-1" onClick={cadastrarEntregador} disabled={loading || !novoNome.trim() || !novoTel.trim()}>
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Cadastrar"}
+              </Button>
+            </div>
           </div>
         )}
       </DialogContent>
