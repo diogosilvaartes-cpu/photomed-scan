@@ -1,7 +1,7 @@
 export const config = { runtime: "edge" };
 
-const ZAPI_URL = "https://api.z-api.io/instances/3F083119DA06B00D1DE5BE013F70DD68/token/788EEF229294A3DE7108092A/send-text";
-const ZAPI_CLIENT_TOKEN = "F703bb4394f324fb580948f20d063be15S";
+const ZAPI_URL = "https://api.z-api.io/instances/3F0A5084BEF5A3D2D9500223DCEC427C/token/118387CD8676A8D266B0BC40/send-text";
+const ZAPI_CLIENT_TOKEN = "Fc294ad65faf9466da2adbb87b7c37ce3S";
 
 export default async function handler(req) {
   if (req.method !== "POST") {

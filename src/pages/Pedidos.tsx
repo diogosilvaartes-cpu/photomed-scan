@@ -199,17 +199,30 @@ function DespacharModal({
           });
         }
 
-        // Notifica entregador via WhatsApp
+        // Notifica entregador e cliente via WhatsApp
         const entregador = entregadores.find((e) => e.id === selectedId);
+        const clienteNome = pedido.clientes?.nome ?? pedido.clientes?.telefone ?? "—";
         if (entregador?.telefone) {
-          const clienteNome = pedido.clientes?.nome ?? pedido.clientes?.telefone ?? "—";
           try {
             await fetch("/api/notify-client", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 phone: entregador.telefone.replace(/\D/g, ""),
-                message: `🛵 Nova entrega!\nCliente: ${clienteNome}\nEndereço: ${pedido.endereco ?? "—"}\nValor: ${pedido.valor_total != null ? formatCurrency(pedido.valor_total) : "—"}`,
+                message: `🛵 *ENTREGA PARA VOCÊ*\n👤 ${clienteNome}\n📍 ${pedido.endereco ?? "—"}\n📦 ${pedido.resumo ?? "ver pedido"}\n💳 ${pedido.valor_total != null ? formatCurrency(pedido.valor_total) : "—"}`,
+              }),
+            });
+          } catch { /* notificação silenciosa */ }
+        }
+        const telefoneCliente = pedido.clientes?.telefone;
+        if (telefoneCliente) {
+          try {
+            await fetch("/api/notify-client", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                phone: telefoneCliente.replace(/\D/g, ""),
+                message: "🚚 Seu pedido saiu para entrega! Em breve chegará até você.",
               }),
             });
           } catch { /* notificação silenciosa */ }
@@ -858,9 +871,27 @@ export default function Pedidos() {
     setRefreshing(false);
   }
 
+  async function notifyWhatsApp(phone: string, message: string) {
+    try {
+      await fetch("/api/notify-client", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phone.replace(/\D/g, ""), message }),
+      });
+    } catch { /* notificação silenciosa */ }
+  }
+
   async function handleStatusChange(id: string, newStatus: string) {
     await externalSupabase.from("pedidos").update({ status: newStatus }).eq("id", id);
     setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
+
+    const pedido = pedidos.find((p) => p.id === id);
+    const telefoneCliente = pedido?.clientes?.telefone;
+    if (telefoneCliente) {
+      if (newStatus === "em_separacao") {
+        notifyWhatsApp(telefoneCliente, "🏥 Seu pedido está sendo separado! Logo sairá para entrega.");
+      }
+    }
   }
 
   async function handleConfirmarEntrega(id: string) {
@@ -874,6 +905,11 @@ export default function Pedidos() {
         .eq("id", despacho.id);
     }
     setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status: "entregue" } : p)));
+
+    const telefoneCliente = pedido?.clientes?.telefone;
+    if (telefoneCliente) {
+      notifyWhatsApp(telefoneCliente, "✅ Seu pedido foi entregue! Obrigado pela preferência. 🙏");
+    }
   }
 
   useEffect(() => {
