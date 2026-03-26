@@ -110,6 +110,7 @@ async function fetchEntregasEntregador(entregadorId: string): Promise<PedidoEntr
     .from("pedidos")
     .select("*, clientes(nome, telefone, observacoes, foto_url), itens_pedido(item, quantidade), despacho_entrega(*)")
     .in("id", pedidoIds)
+    .not("status", "in", '("cancelado","retirado")')
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as PedidoEntrega[];
@@ -955,7 +956,7 @@ export default function Entregas() {
     );
   }
 
-  const emAndamento = pedidos?.filter((p) => p.status !== "entregue") ?? [];
+  const emAndamento = pedidos?.filter((p) => p.status !== "entregue" && p.status !== "cancelado") ?? [];
   const finalizados = pedidos?.filter((p) => p.status === "entregue") ?? [];
 
   // Agrupa por data de criação

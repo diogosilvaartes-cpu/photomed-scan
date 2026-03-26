@@ -170,7 +170,8 @@ function DespacharModal({
   onDone: () => void;
 }) {
   const { toast } = useToast();
-  const [selectedId, setSelectedId] = useState<string>("");
+  const despachoExistenteInicial = pedido.despacho_entrega?.[0] ?? null;
+  const [selectedId, setSelectedId] = useState<string>(despachoExistenteInicial?.entregador_id ?? "");
   const [loading, setLoading] = useState(false);
 
   async function confirmar() {
@@ -188,13 +189,12 @@ function DespacharModal({
         if (despachoExistente) {
           await externalSupabase
             .from("despacho_entrega")
-            .update({ entregador_id: selectedId, saiu_em: new Date().toISOString(), status_entrega: "despachado" })
+            .update({ entregador_id: selectedId, saiu_em: null, chegou_em: null, status_entrega: "despachado" })
             .eq("id", despachoExistente.id);
         } else {
           await externalSupabase.from("despacho_entrega").insert({
             pedido_id: pedido.id,
             entregador_id: selectedId,
-            saiu_em: new Date().toISOString(),
             status_entrega: "despachado",
           });
         }
@@ -243,7 +243,7 @@ function DespacharModal({
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Despachar pedido</DialogTitle>
+          <DialogTitle>{despachoExistenteInicial ? "Mudar entregador" : "Despachar pedido"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
@@ -308,8 +308,9 @@ function OrderCard({
   const [updating, setUpdating] = useState(false);
   const canCancel = p.status ? CANCELABLE.includes(p.status) : false;
 
-  // Para em_separacao mostramos o botão "Despachar" customizado
+  // Para em_separacao e saiu_para_entrega mostramos botões customizados
   const isEmSeparacao = p.status === "em_separacao";
+  const isSaiuParaEntrega = p.status === "saiu_para_entrega";
   // Para outros status avançamos normalmente
   const NEXT_NORMAL: Record<string, { status: string; label: string }> = {
     novo: { status: "em_separacao", label: "Iniciar Separação" },
@@ -425,6 +426,16 @@ function OrderCard({
               )}
             >
               <Truck className="w-4 h-4" />Despachar
+            </button>
+          )}
+          {isSaiuParaEntrega && (
+            <button
+              disabled={updating}
+              onClick={() => onDespachar(p)}
+              title="Mudar entregador"
+              className="w-11 h-11 flex items-center justify-center rounded-xl bg-violet-50 text-violet-600 hover:bg-violet-100 transition-colors shrink-0"
+            >
+              <Truck className="w-4 h-4" />
             </button>
           )}
           {!isEmSeparacao && next && col.actionBg && (
