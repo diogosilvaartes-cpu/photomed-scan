@@ -273,6 +273,34 @@ function DespacharModal({
       toast({ title: "Pedido despachado!" });
       onDone();
       onClose();
+
+      // Fire-and-forget: envia fotos dos produtos para o cliente
+      // Roda APÓS modal fechar, nunca bloqueia nem quebra o fluxo
+      const telefoneCliente2 = pedido.clientes?.telefone;
+      if (telefoneCliente2 && pedido.itens_pedido?.length) {
+        (async () => {
+          try {
+            const nomes2 = pedido.itens_pedido.map((i) => i.item).filter(Boolean);
+            const { data: imgs } = await externalSupabase
+              .from("estoque")
+              .select("nome, imagem_url")
+              .in("nome", nomes2)
+              .not("imagem_url", "is", null);
+            if (!imgs?.length) return;
+            const phone2 = telefoneCliente2.replace(/\D/g, "");
+            for (const img of imgs) {
+              if (!img.imagem_url) continue;
+              const item = pedido.itens_pedido.find((i) => i.item === img.nome);
+              const caption = item ? `${item.quantidade}x ${img.nome}` : img.nome;
+              await fetch("/api/notify-image", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ phone: phone2, image: img.imagem_url, caption }),
+              });
+            }
+          } catch { /* silently fail */ }
+        })();
+      }
     } catch (err: unknown) {
       toast({ title: "Erro ao despachar", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
     } finally {
