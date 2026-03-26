@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Truck, User, MapPin, Phone, Package, Loader2,
   CheckCircle, Clock, ChevronDown, Navigation, Settings, KeyRound,
-  LocateFixed, LogOut
+  LocateFixed, LogOut, Camera, MessageSquare, X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +60,7 @@ type DespachoEntrega = {
   entregador_id: string | null;
   status_entrega: string;
   observacao: string | null;
+  fotos: string[] | null;
   enviado_em: string;
   entregue_em: string | null;
   saiu_em: string | null;
@@ -353,6 +354,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   const saiu = !!despacho?.saiu_em;
   const chegou = !!despacho?.chegou_em;
   const entregue = pedido.status === "entregue";
+  const cancelado = pedido.status === "cancelado";
 
   async function notificarCliente(msg: string) {
     if (!telefone) return;
@@ -411,6 +413,12 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   const [pagForma, setPagForma] = useState("Dinheiro");
   const [pagValor, setPagValor] = useState("");
 
+  const [notasOpen, setNotasOpen] = useState(false);
+  const [obsText, setObsText] = useState(despacho?.observacao ?? "");
+  const [fotosFila, setFotosFila] = useState<File[]>([]);
+  const [salvandoNotas, setSalvandoNotas] = useState(false);
+  const inputFotoRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (pagamentoOpen) {
       setPagItems(despacho?.pagamento_recebido ?? []);
@@ -442,6 +450,17 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
             pagamento_recebido: pagamentos.length ? pagamentos : null,
           })
           .eq("id", despacho.id);
+        // Se o entregador registrou localização GPS, atualizar as coordenadas do endereço do cliente
+        if (despacho.localizacao && pedido.endereco) {
+          const coords = despacho.localizacao.match(/^(-?\d+\.\d+),(-?\d+\.\d+)$/);
+          if (coords) {
+            await externalSupabase
+              .from("enderecos")
+              .update({ latitude: parseFloat(coords[1]), longitude: parseFloat(coords[2]) })
+              .eq("cliente_id", pedido.cliente_id)
+              .eq("label_exibicao", pedido.endereco);
+          }
+        }
       }
       await notificarCliente(
         `Olá, ${primeiroNome}! ✅ Pedido entregue com sucesso! Obrigado por comprar na Farmácia Vital. 💚`
@@ -503,7 +522,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   });
 
   return (
-    <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+    <div className={`bg-card border rounded-xl p-4 space-y-3 ${cancelado ? "border-red-500 opacity-70" : "border-border"}`}>
 
       {/* Header cliente */}
       <div className="flex items-center gap-3">
@@ -516,10 +535,13 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground">{nomeCliente}</p>
-          {pedido.pagamento && (
-            <p className="text-xs text-muted-foreground">Pagamento: {pedido.pagamento}</p>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-foreground">{nomeCliente}</p>
+            {cancelado && <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">Cancelado</span>}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {format(new Date(pedido.created_at), "dd/MM/yy 'às' HH:mm", { locale: ptBR })}
+          </p>
         </div>
         {/* A receber em destaque */}
         {pedido.valor_total != null && (
@@ -569,19 +591,11 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
             </ul>
           </div>
         )}
-        <div className="border-t border-border pt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-          {pedido.valor_total != null && (
-            <div><span className="text-muted-foreground">Total: </span><span className="font-semibold">R$ {pedido.valor_total.toFixed(2)}</span></div>
-          )}
-          {pedido.pagamento && (
-            <div><span className="text-muted-foreground">Pgto: </span><span className="font-medium">{pedido.pagamento}</span></div>
-          )}
-          {pedido.pessoa_recebimento && (
-            <div className="col-span-2"><span className="text-muted-foreground">Recebedor: </span><span className="font-medium">{pedido.pessoa_recebimento}</span></div>
-          )}
-        </div>
-        {pedido.resumo && (
-          <div className="border-t border-border pt-2 text-xs text-muted-foreground">{pedido.resumo}</div>
+        {pedido.pessoa_recebimento && (
+          <div className="border-t border-border pt-2 text-xs">
+            <span className="text-muted-foreground">Recebedor: </span>
+            <span className="font-medium">{pedido.pessoa_recebimento}</span>
+          </div>
         )}
       </div>
 
@@ -603,6 +617,98 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
           className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold bg-secondary text-foreground hover:bg-secondary/80 transition-colors border border-border">
           <User className="w-4 h-4" /> CRM
         </a>
+      </div>
+
+      {/* Notas & Fotos do entregador */}
+      <div>
+        <button
+          onClick={() => setNotasOpen(v => !v)}
+          className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full">
+          <MessageSquare className="w-3.5 h-3.5" />
+          {notasOpen ? "Fechar notas" : `Notas & Fotos${(despacho?.observacao || despacho?.fotos?.length) ? " ✓" : ""}`}
+        </button>
+        {notasOpen && (
+          <div className="mt-2 space-y-2">
+            <textarea
+              rows={2}
+              placeholder="Observação da entrega..."
+              value={obsText}
+              onChange={e => setObsText(e.target.value)}
+              className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            {/* Fotos existentes */}
+            {(despacho?.fotos?.length ?? 0) > 0 && (
+              <div className="flex gap-2 flex-wrap">
+                {despacho!.fotos!.map((url, i) => (
+                  <a key={i} href={url} target="_blank" rel="noreferrer">
+                    <img src={url} alt={`foto ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-border" />
+                  </a>
+                ))}
+              </div>
+            )}
+            {/* Fotos na fila */}
+            {fotosFila.length > 0 && (
+              <div className="flex gap-2 flex-wrap">
+                {fotosFila.map((f, i) => (
+                  <div key={i} className="relative">
+                    <img src={URL.createObjectURL(f)} alt="" className="w-16 h-16 object-cover rounded-lg border border-primary/50" />
+                    <button
+                      onClick={() => setFotosFila(p => p.filter((_, idx) => idx !== i))}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center">
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => inputFotoRef.current?.click()}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-secondary hover:bg-secondary/80 transition-colors">
+                <Camera className="w-3.5 h-3.5" /> Adicionar foto
+              </button>
+              <input
+                ref={inputFotoRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={e => {
+                  if (e.target.files) setFotosFila(p => [...p, ...Array.from(e.target.files!)]);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={salvandoNotas}
+                onClick={async () => {
+                  if (!despacho) return;
+                  setSalvandoNotas(true);
+                  try {
+                    const novasUrls: string[] = [];
+                    for (const file of fotosFila) {
+                      const ext = file.name.split(".").pop() ?? "jpg";
+                      const path = `${despacho.id}/${Date.now()}.${ext}`;
+                      const { error: upErr } = await externalSupabase.storage.from("entregas").upload(path, file);
+                      if (!upErr) {
+                        const { data } = externalSupabase.storage.from("entregas").getPublicUrl(path);
+                        novasUrls.push(data.publicUrl);
+                      }
+                    }
+                    const fotosAtuais = despacho.fotos ?? [];
+                    await externalSupabase.from("despacho_entrega")
+                      .update({ observacao: obsText || null, fotos: [...fotosAtuais, ...novasUrls] })
+                      .eq("id", despacho.id);
+                    setFotosFila([]);
+                    qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
+                  } finally { setSalvandoNotas(false); }
+                }}>
+                {salvandoNotas ? <Loader2 className="w-3 h-3 animate-spin" /> : "Salvar"}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Localização registrada */}
