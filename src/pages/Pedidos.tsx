@@ -177,12 +177,48 @@ function DespacharModal({
   async function confirmar() {
     setLoading(true);
     try {
-      // Atualiza status do pedido
+      // Calcular valor_total a partir dos preços do estoque (se ainda não tiver)
+      let valorTotal = pedido.valor_total;
+      if (!valorTotal && pedido.itens_pedido?.length) {
+        const nomes = pedido.itens_pedido.map((i) => i.item).filter(Boolean);
+        const { data: estoqueItems } = await externalSupabase
+          .from("estoque")
+          .select("nome, preco")
+          .in("nome", nomes);
+        if (estoqueItems?.length) {
+          const precoMap: Record<string, number> = {};
+          estoqueItems.forEach((e) => { if (e.nome && e.preco != null) precoMap[e.nome] = e.preco; });
+          const total = pedido.itens_pedido.reduce((s, i) => s + (precoMap[i.item] ?? 0) * i.quantidade, 0);
+          if (total > 0) valorTotal = total;
+        }
+      }
+
+      // Atualiza status + valor_total do pedido
+      const pedidoUpdate: Record<string, unknown> = { status: "saiu_para_entrega" };
+      if (valorTotal && !pedido.valor_total) pedidoUpdate.valor_total = valorTotal;
       const { error: errPedido } = await externalSupabase
         .from("pedidos")
-        .update({ status: "saiu_para_entrega" })
+        .update(pedidoUpdate)
         .eq("id", pedido.id);
       if (errPedido) throw new Error(errPedido.message);
+
+      // Decrementar estoque
+      if (pedido.itens_pedido?.length) {
+        for (const item of pedido.itens_pedido) {
+          if (!item.item || !item.quantidade) continue;
+          const { data: estoqueRow } = await externalSupabase
+            .from("estoque")
+            .select("id, quantidade")
+            .eq("nome", item.item)
+            .maybeSingle();
+          if (estoqueRow) {
+            await externalSupabase
+              .from("estoque")
+              .update({ quantidade: Math.max(0, (estoqueRow.quantidade ?? 0) - item.quantidade) })
+              .eq("id", estoqueRow.id);
+          }
+        }
+      }
 
       if (selectedId) {
         const despachoExistente = pedido.despacho_entrega?.[0];
@@ -199,9 +235,14 @@ function DespacharModal({
           });
         }
 
-        // Notifica entregador e cliente via WhatsApp
+        // Notifica entregador com lista de itens
         const entregador = entregadores.find((e) => e.id === selectedId);
         const clienteNome = pedido.clientes?.nome ?? pedido.clientes?.telefone ?? "—";
+        const itensStr = pedido.itens_pedido
+          ?.filter((i) => i.item)
+          .map((i) => `• ${i.quantidade}x ${i.item}`)
+          .join("\n") || "ver pedido";
+        const valorStr = valorTotal != null ? formatCurrency(valorTotal) : "—";
         if (entregador?.telefone) {
           try {
             await fetch("/api/notify-client", {
@@ -209,7 +250,7 @@ function DespacharModal({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 phone: entregador.telefone.replace(/\D/g, ""),
-                message: `🛵 *ENTREGA PARA VOCÊ*\n👤 ${clienteNome}\n📍 ${pedido.endereco ?? "—"}\n📦 ${pedido.resumo ?? "ver pedido"}\n💳 ${pedido.valor_total != null ? formatCurrency(pedido.valor_total) : "—"}`,
+                message: `🛵 *ENTREGA PARA VOCÊ*\n👤 ${clienteNome}\n📍 ${pedido.endereco ?? "—"}\n\n📦 *Itens:*\n${itensStr}\n\n💳 ${pedido.pagamento ?? "—"} — ${valorStr}`,
               }),
             });
           } catch { /* notificação silenciosa */ }
@@ -253,6 +294,24 @@ function DespacharModal({
             <p className="text-sm text-muted-foreground">
               Endereço: <span className="font-medium text-foreground">{pedido.endereco}</span>
             </p>
+          )}
+          {pedido.itens_pedido?.filter(i => i.item).length > 0 && (
+            <div className="bg-secondary rounded-lg px-3 py-2 text-sm space-y-0.5">
+              {pedido.itens_pedido.filter(i => i.item).map((i, idx) => (
+                <div key={idx} className="flex justify-between">
+                  <span>{i.item}</span>
+                  <span className="font-medium text-muted-foreground">×{i.quantidade}</span>
+                </div>
+              ))}
+              {pedido.valor_total != null && (
+                <div className="border-t border-border pt-1 mt-1 flex justify-between font-semibold">
+                  <span>Total</span><span>{formatCurrency(pedido.valor_total)}</span>
+                </div>
+              )}
+              {pedido.pagamento && (
+                <p className="text-xs text-muted-foreground pt-0.5">Pgto: {pedido.pagamento}</p>
+              )}
+            </div>
           )}
           <div className="space-y-1.5">
             <Label>Entregador (opcional)</Label>
