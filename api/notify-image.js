@@ -1,34 +1,55 @@
 export const config = { runtime: "edge" };
 
-const ZAPI_IMAGE_URL = "https://api.z-api.io/instances/3F0A5084BEF5A3D2D9500223DCEC427C/token/118387CD8676A8D266B0BC40/send-image";
-const ZAPI_CLIENT_TOKEN = "Fc294ad65faf9466da2adbb87b7c37ce3S";
+/**
+ * Envia imagem no WhatsApp pela Z-API. Ver `notify-client.js` — mesma correcao:
+ * instancia e tokens saem do ambiente, nao mais hardcoded (apontavam para a
+ * instancia morta `3F0A5084...`).
+ *
+ * Exige na Vercel: ZAPI_INSTANCE, ZAPI_TOKEN, ZAPI_CLIENT_TOKEN.
+ */
+
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 export default async function handler(req) {
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  const instance = process.env.ZAPI_INSTANCE;
+  const token = process.env.ZAPI_TOKEN;
+  const clientToken = process.env.ZAPI_CLIENT_TOKEN;
+
+  if (!instance || !token || !clientToken) {
+    return json({ error: "Z-API nao configurada no ambiente" }, 500);
   }
 
   const { phone, image, caption } = await req.json();
 
   if (!phone || !image) {
-    return new Response(JSON.stringify({ error: "phone e image são obrigatórios" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ error: "phone e image sao obrigatorios" }, 400);
   }
 
-  const r = await fetch(ZAPI_IMAGE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Client-Token": ZAPI_CLIENT_TOKEN,
+  const r = await fetch(
+    `https://api.z-api.io/instances/${instance}/token/${token}/send-image`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Client-Token": clientToken,
+      },
+      body: JSON.stringify({
+        phone: String(phone).replace(/\D/g, ""),
+        image,
+        caption: caption ?? "",
+      }),
     },
-    body: JSON.stringify({ phone, image, caption: caption ?? "" }),
-  });
+  );
 
-  const data = await r.json();
-  return new Response(JSON.stringify(data), {
-    status: r.ok ? 200 : r.status,
-    headers: { "Content-Type": "application/json" },
-  });
+  const data = await r.json().catch(() => ({}));
+  return json(data, r.ok ? 200 : r.status);
 }

@@ -188,9 +188,12 @@ function DespacharModal({
           .map((i) => `• ${i.quantidade}x ${i.item}`)
           .join("\n") || "ver pedido";
         const valorStr = valorTotal != null ? formatCurrency(valorTotal) : "—";
+        // Só o entregador é avisado aqui. O cliente é avisado quando o
+        // entregador de fato sai (botão no painel dele ou no WhatsApp) — mesma
+        // regra que o n8n segue desde 03/08.
         if (entregador?.telefone) {
           try {
-            await fetch("/api/notify-client", {
+            const r = await fetch("/api/notify-client", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -198,20 +201,14 @@ function DespacharModal({
                 message: `🛵 *ENTREGA PARA VOCÊ*\n👤 ${clienteNome}\n📍 ${pedido.endereco ?? "—"}\n\n📦 *Itens:*\n${itensStr}\n\n💳 ${pedido.pagamento ?? "—"} — ${valorStr}`,
               }),
             });
-          } catch { /* notificação silenciosa */ }
-        }
-        const telefoneCliente = pedido.clientes?.telefone;
-        if (telefoneCliente) {
-          try {
-            await fetch("/api/notify-client", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                phone: telefoneCliente.replace(/\D/g, ""),
-                message: "🚚 Seu pedido saiu pra entrega!",
-              }),
+            if (!r.ok) throw new Error(String(r.status));
+          } catch {
+            toast({
+              title: "Entregador não foi avisado",
+              description: "O despacho foi salvo, mas o WhatsApp não saiu. Chame o entregador.",
+              variant: "destructive",
             });
-          } catch { /* notificação silenciosa */ }
+          }
         }
       }
 

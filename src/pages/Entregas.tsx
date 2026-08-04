@@ -356,15 +356,24 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   const entregue = pedido.status === "entregue";
   const cancelado = pedido.status === "cancelado";
 
+  // Não bloqueia o fluxo, mas avisa na tela quando o WhatsApp não sai — foi o
+  // silêncio total aqui que escondeu por semanas uma instância Z-API morta.
   async function notificarCliente(msg: string) {
     if (!telefone) return;
     try {
-      await fetch("/api/notify-client", {
+      const r = await fetch("/api/notify-client", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: telefone.replace(/\D/g, ""), message: msg }),
       });
-    } catch { /* notificação silenciosa — não bloqueia o fluxo */ }
+      if (!r.ok) throw new Error(String(r.status));
+    } catch {
+      toast({
+        title: "Cliente não foi avisado",
+        description: "O status foi salvo, mas o WhatsApp não saiu. Avise o balcão.",
+        variant: "destructive",
+      });
+    }
   }
 
   const primeiroNome = nomeCliente.split(" ")[0];
