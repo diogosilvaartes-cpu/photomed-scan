@@ -80,45 +80,19 @@ export default function MedScanForm() {
     try {
       const { base64, mimeType } = await compressImage(imageFile);
 
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      // A leitura roda em /api/analyze (serverless) — a chave do modelo fica no
+      // servidor. Chamar o provedor direto daqui exporia a chave no bundle.
+      const response = await fetch("/api/analyze", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          max_tokens: 400,
-          temperature: 0.1,
-          messages: [{
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                image_url: { url: `data:${mimeType};base64,${base64}` },
-              },
-              {
-                type: "text",
-                text: `Analise a embalagem deste medicamento e extraia as informações. Responda SOMENTE com um JSON válido, sem markdown, sem explicações, sem bloco de código, no formato:
-{"name":"nome do medicamento","lab":"laboratório fabricante","dosage":"dosagem ex: 500mg","pharmaForm":"forma farmacêutica ex: Comprimido","quantity":"quantidade numérica de unidades na embalagem","batch":"número do lote ou vazio se não visível","expiry":"validade no formato YYYY-MM ou vazio se não visível"}`,
-              },
-            ],
-          }],
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base64, mimeType }),
       });
 
-      if (!response.ok) {
-        const errBody = await response.text();
-        throw new Error(`OpenAI ${response.status}: ${errBody}`);
-      }
+      const parsed = await response.json();
 
-      const data = await response.json();
-      const text = data.choices?.[0]?.message?.content ?? "";
-      // Extrai JSON mesmo se vier com markdown ```json ... ```
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("JSON não encontrado na resposta");
-      const parsed = JSON.parse(jsonMatch[0]);
+      if (!response.ok) {
+        throw new Error(parsed?.error ?? `Falha na leitura (HTTP ${response.status})`);
+      }
 
       setForm({
         name: parsed.name ?? "",

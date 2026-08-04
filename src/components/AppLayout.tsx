@@ -1,6 +1,6 @@
-import { ReactNode, useState } from "react";
+import { ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Package, Users, Truck, LogOut, Menu, X, FlaskConical, ClipboardList, LayoutDashboard, Bike } from "lucide-react";
+import { Package, Users, Truck, LogOut, FlaskConical, ClipboardList, Bike } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/BrandMark";
 import { useAuth } from "@/lib/auth";
@@ -14,23 +14,27 @@ interface NavItem {
   entregadorOnly?: boolean;
 }
 
+/** Ordem de trabalho do balcão: a fila primeiro, o resto em volta dela. */
 const NAV_ITEMS: NavItem[] = [
-  { to: "/", icon: <LayoutDashboard className="w-5 h-5" />, label: "Dashboard", adminOnly: true },
-  { to: "/scan", icon: <FlaskConical className="w-5 h-5" />, label: "Scan", adminOnly: true },
+  { to: "/pedidos", icon: <ClipboardList className="w-5 h-5" />, label: "Pedidos" },
   { to: "/estoque", icon: <Package className="w-5 h-5" />, label: "Estoque", adminOnly: true },
-  { to: "/pedidos", icon: <ClipboardList className="w-5 h-5" />, label: "Pedidos", adminOnly: true },
   { to: "/clientes", icon: <Users className="w-5 h-5" />, label: "Clientes" },
   { to: "/entregadores", icon: <Bike className="w-5 h-5" />, label: "Entregadores", adminOnly: true },
+  { to: "/scan", icon: <FlaskConical className="w-5 h-5" />, label: "Scan", adminOnly: true },
   { to: "/entregas", icon: <Truck className="w-5 h-5" />, label: "Entregas", entregadorOnly: true },
 ];
 
-function NavItems({ onClick }: { onClick?: () => void }) {
+function useNavItems() {
   const { role } = useAuth();
-  const items = NAV_ITEMS.filter((i) => {
+  return NAV_ITEMS.filter((i) => {
     if (i.adminOnly && role !== "admin") return false;
     if (i.entregadorOnly && role === "admin") return false;
     return true;
   });
+}
+
+function NavItems({ onClick }: { onClick?: () => void }) {
+  const items = useNavItems();
 
   return (
     <nav className="flex flex-col gap-1 px-3">
@@ -90,7 +94,7 @@ function UserInfo() {
   );
 }
 
-function SidebarContent({ onClose }: { onClose?: () => void }) {
+function SidebarContent() {
   return (
     <div className="flex flex-col h-full bg-sidebar">
       {/* Marca */}
@@ -102,20 +106,11 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
           </p>
           <p className="text-xs text-sidebar-foreground/80 truncate">Painel Operacional</p>
         </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="ml-auto text-sidebar-foreground hover:text-sidebar-accent-foreground"
-            aria-label="Fechar menu"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
       </div>
 
       {/* Navegação */}
       <div className="flex-1 py-4 overflow-y-auto">
-        <NavItems onClick={onClose} />
+        <NavItems />
       </div>
 
       {/* Usuário */}
@@ -124,9 +119,55 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   );
 }
 
-export default function AppLayout({ children }: { children: ReactNode }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
+/**
+ * Menu mobile: ícones quadrados fixos no topo, sempre visíveis.
+ * Substituiu a gaveta com hambúrguer — no balcão, trocar de seção é a ação
+ * mais frequente e não compensa dois toques para cada troca.
+ */
+function MobileNav() {
+  const items = useNavItems();
 
+  return (
+    <nav className="flex gap-2 px-3 pb-2.5 overflow-x-auto">
+      {items.map((item) => (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          className={({ isActive }) =>
+            cn(
+              "flex flex-col items-center justify-center gap-1 shrink-0 w-[68px] h-[62px] rounded-xl border text-[11px] font-semibold transition-colors",
+              isActive
+                ? "bg-primary text-primary-foreground border-transparent"
+                : "bg-secondary text-muted-foreground border-border hover:text-foreground"
+            )
+          }
+        >
+          {item.icon}
+          <span className="leading-none">{item.label}</span>
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
+function MobileSignOut() {
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={async () => { await signOut(); navigate("/login"); }}
+      title="Sair"
+      className="ml-auto text-muted-foreground hover:text-foreground shrink-0"
+    >
+      <LogOut className="w-4 h-4" />
+    </Button>
+  );
+}
+
+export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Sidebar desktop */}
@@ -134,34 +175,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <SidebarContent />
       </aside>
 
-      {/* Overlay mobile */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 flex md:hidden">
-          <div
-            className="absolute inset-0 bg-foreground/50"
-            onClick={() => setMobileOpen(false)}
-          />
-          <aside className="relative z-50 w-72 h-full shadow-card-hover">
-            <SidebarContent onClose={() => setMobileOpen(false)} />
-          </aside>
-        </div>
-      )}
-
       {/* Conteúdo */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Topbar mobile */}
-        <header className="md:hidden flex items-center gap-3 px-4 py-3 border-b border-border bg-card">
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="text-muted-foreground hover:text-foreground"
-            aria-label="Abrir menu"
-          >
-            <Menu className="w-6 h-6" />
-          </button>
-          <div className="flex items-center gap-2">
+        {/* Topbar mobile: marca + menu de ícones quadrados */}
+        <header className="md:hidden border-b border-border bg-card">
+          <div className="flex items-center gap-2 px-4 pt-3 pb-2">
             <BrandMark className="w-7 h-7" />
             <span className="font-display text-sm font-extrabold text-foreground">Farmácia Vital</span>
+            <MobileSignOut />
           </div>
+          <MobileNav />
         </header>
 
         {/* Página */}

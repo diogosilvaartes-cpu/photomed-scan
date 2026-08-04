@@ -7,13 +7,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import AppLayout from "@/components/AppLayout";
 import Index from "./pages/Index.tsx";
-import Dashboard from "./pages/Dashboard.tsx";
 import Estoque from "./pages/Estoque.tsx";
 import Pedidos from "./pages/Pedidos.tsx";
 import Login from "./pages/Login.tsx";
 import Clientes from "./pages/Clientes.tsx";
 import Entregas from "./pages/Entregas.tsx";
 import Entregadores from "./pages/Entregadores.tsx";
+import PedidoLink from "./pages/PedidoLink.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -41,17 +41,31 @@ function ProtectedRoute({ children, adminOnly = false }: { children: ReactNode; 
   return <AppLayout>{children}</AppLayout>;
 }
 
+/**
+ * A home é a fila de Pedidos (o Dashboard foi removido — não era usado).
+ * O entregador continua caindo em Entregas, que é a tela de trabalho dele;
+ * Pedidos ele acessa pelo menu, em modo leitura.
+ */
+function Home() {
+  const { role, loading } = useAuth();
+  if (loading) return null;
+  return <Navigate to={role === "entregador" ? "/entregas" : "/pedidos"} replace />;
+}
+
 function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/" element={<ProtectedRoute adminOnly><Dashboard /></ProtectedRoute>} />
+      <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute adminOnly><Index /></ProtectedRoute>} />
       <Route path="/estoque" element={<ProtectedRoute adminOnly><Estoque /></ProtectedRoute>} />
-      <Route path="/pedidos" element={<ProtectedRoute adminOnly><Pedidos /></ProtectedRoute>} />
+      {/* Entregador também acessa, em modo leitura (a própria página esconde as ações) */}
+      <Route path="/pedidos" element={<ProtectedRoute><Pedidos /></ProtectedRoute>} />
       <Route path="/clientes" element={<ProtectedRoute><Clientes /></ProtectedRoute>} />
       <Route path="/entregas" element={<ProtectedRoute><Entregas /></ProtectedRoute>} />
       <Route path="/entregadores" element={<ProtectedRoute adminOnly><Entregadores /></ProtectedRoute>} />
+      {/* Link do WhatsApp: o entregador também abre, a ficha se vira sozinha em leitura */}
+      <Route path="/pedido/:codigo" element={<ProtectedRoute><PedidoLink /></ProtectedRoute>} />
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
       <Route path="*" element={<NotFound />} />
     </Routes>

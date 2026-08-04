@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,13 +15,19 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const { session, role } = useAuth();
+
+  // O `ProtectedRoute` guarda em `state.from` a página que a pessoa tentou abrir.
+  // Sem respeitar isso, quem chega por link do WhatsApp (`/pedido/04ago1157`) loga
+  // e cai na home, perdendo o pedido que queria ver.
+  const destino = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
 
   useEffect(() => {
     if (session && role) {
-      navigate(role === "entregador" ? "/entregas" : "/", { replace: true });
+      navigate(destino ?? (role === "entregador" ? "/entregas" : "/"), { replace: true });
     }
-  }, [session, role, navigate]);
+  }, [session, role, navigate, destino]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();

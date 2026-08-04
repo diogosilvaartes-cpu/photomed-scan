@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { externalSupabase, pinToPassword } from "@/integrations/supabase/external-client";
 import { cn } from "@/lib/utils";
 import { brl, moneyClass } from "@/lib/status";
+import FichaPedidoPorId from "@/components/FichaPedidoPorId";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -838,6 +839,7 @@ function AbaHistorico({ despachos, entregadores }: {
   const [periodo, setPeriodo] = useState<typeof PERIODOS[number]["key"]>("7d");
   const [filtroEntregador, setFiltroEntregador] = useState<string>("todos");
   const [busca, setBusca] = useState("");
+  const [fichaId, setFichaId] = useState<string | null>(null);
 
   const finalizados = useMemo(() => {
     const cfg = PERIODOS.find((p) => p.key === periodo)!;
@@ -943,10 +945,11 @@ function AbaHistorico({ despachos, entregadores }: {
             const dur = minutosEntre(d.saiu_em, d.entregue_em);
             const recebido = totalRecebido(d.pagamento_recebido);
             return (
-              <div
+              <button
                 key={d.id}
+                onClick={() => d.pedido_id && setFichaId(d.pedido_id)}
                 className={cn(
-                  "bg-card border rounded-xl px-4 py-3",
+                  "w-full text-left bg-card border rounded-xl px-4 py-3 hover:bg-secondary transition-colors",
                   cancelado ? "border-red-200" : "border-border"
                 )}
               >
@@ -1004,11 +1007,17 @@ function AbaHistorico({ despachos, entregadores }: {
                     ) : null}
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
       )}
+
+      <FichaPedidoPorId
+        pedidoId={fichaId}
+        open={!!fichaId}
+        onClose={() => setFichaId(null)}
+      />
     </div>
   );
 }

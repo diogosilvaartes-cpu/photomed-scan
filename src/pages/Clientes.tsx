@@ -15,11 +15,11 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase } from "@/integrations/supabase/external-client";
+import { brl } from "@/lib/status";
+import { fotoWhatsApp } from "@/lib/pedido";
+import FichaPedidoPorId from "@/components/FichaPedidoPorId";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-
-const ZAPI_BASE = "https://api.z-api.io/instances/3F083119DA06B00D1DE5BE013F70DD68/token/788EEF229294A3DE7108092A";
-const ZAPI_CLIENT_TOKEN = "F703bb4394f324fb580948f20d063be15S";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   novo: { label: "Novo", color: "bg-status-novo/15 text-status-ink-novo" },
@@ -94,15 +94,25 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${s.color}`}>{s.label}</span>;
 }
 
-function ClientAvatar({ nome, fotoUrl, size = "sm" }: { nome: string | null; fotoUrl?: string | null; size?: "sm" | "lg" }) {
+function ClientAvatar({ nome, fotoUrl, telefone, size = "sm" }: {
+  nome: string | null; fotoUrl?: string | null; telefone?: string | null; size?: "sm" | "lg";
+}) {
   const initials = (nome ?? "?").split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
   const base = size === "lg"
     ? "w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden font-bold text-lg text-primary"
     : "w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden font-bold text-sm text-primary";
+
+  // Cascata: foto salva → proxy do WhatsApp → iniciais. A foto salva costuma
+  // estar vazia ou expirada, então o proxy é quem faz a imagem aparecer.
+  const candidatos = [fotoUrl?.trim() || null, fotoWhatsApp(telefone)].filter(Boolean) as string[];
+  const [idx, setIdx] = useState(0);
+  useEffect(() => { setIdx(0); }, [fotoUrl, telefone]);
+  const src = candidatos[idx] ?? null;
+
   return (
     <div className={base}>
-      {fotoUrl
-        ? <img src={fotoUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+      {src
+        ? <img key={src} src={src} alt="" className="w-full h-full object-cover" onError={() => setIdx((i) => i + 1)} />
         : initials}
     </div>
   );
@@ -118,6 +128,7 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
   const [obs, setObs] = useState(cliente?.observacoes ?? "");
   const [anotacoes, setAnotacoes] = useState(cliente?.anotacoes_entregador ?? "");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [fichaId, setFichaId] = useState<string | null>(null);
   const fotoInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setObs(cliente?.observacoes ?? "");
@@ -204,7 +215,7 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
       <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
         <SheetHeader className="pb-4">
           <SheetTitle className="flex items-center gap-3">
-            <ClientAvatar nome={cliente.nome} fotoUrl={cliente.foto_url} size="lg" />
+            <ClientAvatar nome={cliente.nome} fotoUrl={cliente.foto_url} telefone={cliente.telefone} size="lg" />
             <div>
               <div>{cliente.nome ?? cliente.telefone}</div>
               <div className="text-sm text-muted-foreground font-normal">{cliente.telefone}</div>
@@ -229,7 +240,7 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
           ))}
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <ShoppingBag className="w-4 h-4 shrink-0" />
-            <span>{pedidos?.length ?? 0} pedido(s) · R$ {totalGasto.toFixed(2)}</span>
+            <span>{pedidos?.length ?? 0} pedido(s) · {brl(totalGasto)}</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <MessageSquare className="w-4 h-4 shrink-0" />
@@ -315,7 +326,11 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
         ) : (
           <div className="space-y-3">
             {pedidos.map((p) => (
-              <div key={p.id} className="bg-secondary rounded-xl p-3 space-y-2">
+              <button
+                key={p.id}
+                onClick={() => setFichaId(p.id)}
+                className="w-full text-left bg-secondary rounded-xl p-3 space-y-2 hover:bg-secondary/70 transition-colors"
+              >
                 <div className="flex items-center justify-between">
                   <StatusBadge status={p.status} />
                   <span className="text-xs text-muted-foreground">{format(new Date(p.created_at), "dd/MM/yy HH:mm", { locale: ptBR })}</span>
@@ -333,12 +348,18 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
                 ) : p.resumo ? <p className="text-sm">{p.resumo}</p> : null}
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>{p.tipo_fulfillment === "entrega" ? "Entrega" : "Retirada"}</span>
-                  {p.valor_total ? <span className="font-medium text-foreground">R$ {p.valor_total.toFixed(2)}</span> : null}
+                  {p.valor_total ? <span className="font-medium text-foreground">{brl(p.valor_total)}</span> : null}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
+
+        <FichaPedidoPorId
+          pedidoId={fichaId}
+          open={!!fichaId}
+          onClose={() => setFichaId(null)}
+        />
       </SheetContent>
     </Sheet>
   );
@@ -376,7 +397,7 @@ function ClienteModal({ open, onClose, cliente }: { open: boolean; onClose: () =
     photoTimer.current = setTimeout(async () => {
       setFetchingPhoto(true);
       try {
-        const res = await fetch(`${ZAPI_BASE}/profile-picture?phone=${digits}`, { headers: { "Client-Token": ZAPI_CLIENT_TOKEN } });
+        const res = await fetch(`/api/whatsapp-photo?phone=${digits}&json=1`);
         const data = await res.json();
         if (data?.link) setFotoUrl(data.link);
       } catch { /* silent */ } finally { setFetchingPhoto(false); }
@@ -422,7 +443,9 @@ function ClienteModal({ open, onClose, cliente }: { open: boolean; onClose: () =
           <div className="flex items-center gap-4 p-3 bg-secondary rounded-xl">
             <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden shrink-0 relative border border-border">
               {fetchingPhoto && <div className="absolute inset-0 bg-white/70 flex items-center justify-center"><Loader2 className="w-4 h-4 animate-spin text-primary" /></div>}
-              {fotoUrl ? <img src={fotoUrl} alt="" className="w-full h-full object-cover" /> : <User className="w-6 h-6 text-primary" />}
+              {(fotoUrl?.trim() || fotoWhatsApp(telefone))
+                ? <img src={fotoUrl?.trim() || fotoWhatsApp(telefone)!} alt="" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                : <User className="w-6 h-6 text-primary" />}
             </div>
             <div className="text-sm">
               <p className="font-medium">Foto do WhatsApp</p>
@@ -473,7 +496,7 @@ function ClienteModal({ open, onClose, cliente }: { open: boolean; onClose: () =
 
 // ─── Página principal ────────────────────────────────────────────────────────
 export default function Clientes() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
@@ -492,10 +515,14 @@ export default function Clientes() {
     queryFn: () => fetchClientes(debouncedSearch),
   });
 
-  // Auto-abre drawer quando ?id= está presente na URL
+  // Auto-abre o drawer quando chega `?id=` na URL (ex.: vindo da ficha do pedido).
+  // O param é consumido na hora: sem isso, cada refetch da lista reabriria o
+  // drawer que o usuário acabou de fechar.
   useEffect(() => {
     const idParam = searchParams.get("id");
     if (!idParam || !clientes) return;
+    setSearchParams({}, { replace: true });
+
     const found = clientes.find((c) => c.id === idParam);
     if (found) {
       setSelectedCliente(found);
@@ -506,7 +533,7 @@ export default function Clientes() {
         if (data) { setSelectedCliente(data as Cliente); setDrawerOpen(true); }
       });
     }
-  }, [clientes, searchParams]);
+  }, [clientes, searchParams, setSearchParams]);
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
@@ -538,7 +565,7 @@ export default function Clientes() {
             return (
               <button key={c.id} onClick={() => { setSelectedCliente(c); setDrawerOpen(true); }}
                 className="w-full bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3 hover:bg-secondary transition-colors text-left">
-                <ClientAvatar nome={c.nome} fotoUrl={c.foto_url} />
+                <ClientAvatar nome={c.nome} fotoUrl={c.foto_url} telefone={c.telefone} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{c.nome ?? "Sem nome"}</p>
                   <p className="text-xs text-muted-foreground">{c.telefone}</p>

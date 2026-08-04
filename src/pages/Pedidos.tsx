@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import {
   Loader2, RefreshCw, Phone, MapPin, CreditCard, Package, ChevronRight, X, Clock,
-  Truck, Navigation, LocateFixed, CheckCircle,
+  Truck, Navigation, LocateFixed, CheckCircle, Eye, FileText, History, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -13,48 +13,17 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import { STATUS } from "@/lib/status";
+import { STATUS, statusConfig, brl, moneyClass } from "@/lib/status";
+import FichaPedido from "@/components/FichaPedido";
+import NovoPedidoModal from "@/components/NovoPedidoModal";
+import {
+  type Pedido, type EntregadorFull,
+  PEDIDO_SELECT, formatPhone, formatCurrency, timeAgo, isCoords, mapsLink, pedidoNumero,
+} from "@/lib/pedido";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Item { item: string; quantidade: number; }
-interface ItemPagamento { forma: string; valor: number; }
-
-interface Despacho {
-  id: string;
-  entregador_id: string | null;
-  pagamento_recebido: ItemPagamento[] | null;
-  saiu_em: string | null;
-  chegou_em: string | null;
-  localizacao: string | null;
-  status_entrega: string;
-}
-
-interface Pedido {
-  id: string;
-  status: string | null;
-  resumo: string | null;
-  tipo_fulfillment: string | null;
-  endereco: string | null;
-  pagamento: string | null;
-  valor_total: number | null;
-  pix_link: string | null;
-  created_at: string | null;
-  clientes: { nome: string | null; telefone: string | null } | null;
-  itens_pedido: Item[];
-  despacho_entrega: Despacho[];
-}
-
-interface EntregadorFull {
-  id: string;
-  nome: string;
-  telefone: string;
-  ativo: boolean;
-  user_id: string | null;
-}
 
 // ─── Kanban config ────────────────────────────────────────────────────────────
 
@@ -125,33 +94,9 @@ type ColConfig = typeof COLUNAS[number];
 
 const CANCELABLE = ["novo", "em_separacao", "saiu_para_entrega"];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatPhone(tel: string | null) {
-  if (!tel) return null;
-  return tel.replace(/\D/g, "").replace(/^55/, "");
-}
-
-function formatCurrency(val: number) {
-  return val.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function timeAgo(dateStr: string) {
-  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
-  if (diff < 60) return "agora";
-  if (diff < 3600) return `${Math.floor(diff / 60)}min`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  return `${Math.floor(diff / 86400)}d`;
-}
-
-function isCoords(str: string) {
-  return /^-?\d+\.\d+,-?\d+\.\d+$/.test(str.trim());
-}
-
-function mapsLink(endereco: string) {
-  return isCoords(endereco)
-    ? `https://maps.google.com/?q=${endereco}`
-    : `https://maps.google.com/?q=${encodeURIComponent(endereco)}`;
+/** Impede que um clique em link/botão dentro do card abra a ficha. */
+function pararPropagacao(e: React.MouseEvent) {
+  e.stopPropagation();
 }
 
 // ─── DespacharModal ───────────────────────────────────────────────────────────
@@ -375,12 +320,16 @@ function OrderCard({
   entregadores,
   onStatusChange,
   onDespachar,
+  onAbrirFicha,
+  readOnly = false,
 }: {
   p: Pedido;
   col: ColConfig;
   entregadores: EntregadorFull[];
   onStatusChange: (id: string, newStatus: string) => Promise<void>;
   onDespachar: (pedido: Pedido) => void;
+  onAbrirFicha: (pedido: Pedido) => void;
+  readOnly?: boolean;
 }) {
   const phone = formatPhone(p.clientes?.telefone ?? null);
   const nome = p.clientes?.nome ?? "Cliente";
@@ -412,23 +361,43 @@ function OrderCard({
   }
 
   return (
-    <div className={cn("shrink-0 rounded-2xl border-l-4 shadow-md overflow-hidden border border-white/60", col.bgLight, col.cardAccent)}>
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Abrir ficha do pedido de ${nome}`}
+      onClick={() => onAbrirFicha(p)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onAbrirFicha(p); }
+      }}
+      className={cn(
+        "group shrink-0 rounded-2xl border-l-4 shadow-md overflow-hidden border border-white/60",
+        "cursor-pointer transition-shadow hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        col.bgLight, col.cardAccent
+      )}
+    >
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-start justify-between gap-2 mb-1.5">
-          <p className="text-lg font-bold text-foreground leading-tight">{nome}</p>
-          {p.created_at && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0 mt-1">
-              <Clock className="w-3 h-3" />
-              {timeAgo(p.created_at)}
-            </div>
-          )}
+          <div className="min-w-0">
+            <p className="text-lg font-bold text-foreground leading-tight">{nome}</p>
+            <span className="text-[11px] font-mono text-muted-foreground">{pedidoNumero(p)}</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0 mt-1">
+            {p.created_at && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock className="w-3 h-3" />
+                {timeAgo(p.created_at)}
+              </span>
+            )}
+            <FileText className={cn("w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity", col.text)} />
+          </div>
         </div>
         {phone && (
           <a
             href={`https://wa.me/55${phone}`}
             target="_blank"
             rel="noreferrer"
+            onClick={pararPropagacao}
             className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80"
           >
             <Phone className="w-4 h-4" />
@@ -461,7 +430,7 @@ function OrderCard({
       {/* Endereço + valor */}
       <div className="px-4 py-3 space-y-2">
         {p.endereco && enderecoLink && (
-          <a href={enderecoLink} target="_blank" rel="noreferrer"
+          <a href={enderecoLink} target="_blank" rel="noreferrer" onClick={pararPropagacao}
             className="flex items-start gap-2 text-sm text-status-ink-novo hover:underline">
             <MapPin className="w-4 h-4 mt-0.5 shrink-0" />
             <span className="line-clamp-2">{enderecoIsCoords ? "Ver no Maps" : p.endereco}</span>
@@ -472,7 +441,7 @@ function OrderCard({
             <CreditCard className="w-4 h-4" />
             <span>{p.pagamento ?? "—"}</span>
             {p.pix_link && (
-              <a href={p.pix_link} target="_blank" rel="noreferrer"
+              <a href={p.pix_link} target="_blank" rel="noreferrer" onClick={pararPropagacao}
                 className="ml-1 text-status-ink-novo text-xs hover:underline font-medium">ver PIX</a>
             )}
           </div>
@@ -499,9 +468,9 @@ function OrderCard({
         ) : null}
       </div>
 
-      {/* Ações */}
-      {(next || isEmSeparacao || canCancel) && (
-        <div className="px-4 pb-4 flex gap-2">
+      {/* Ações — escondidas para entregador: a aba dele espelha o balcão, mas é só leitura */}
+      {!readOnly && (next || isEmSeparacao || canCancel) && (
+        <div className="px-4 pb-4 flex gap-2" onClick={pararPropagacao}>
           {isEmSeparacao && (
             <button
               disabled={updating}
@@ -559,10 +528,14 @@ function NaRuaCard({
   p,
   entregadores,
   onConfirmarEntrega,
+  onAbrirFicha,
+  readOnly = false,
 }: {
   p: Pedido;
   entregadores: EntregadorFull[];
   onConfirmarEntrega: (id: string) => Promise<void>;
+  onAbrirFicha: (pedido: Pedido) => void;
+  readOnly?: boolean;
 }) {
   const { toast } = useToast();
   const phone = formatPhone(p.clientes?.telefone ?? null);
@@ -589,20 +562,36 @@ function NaRuaCard({
   }
 
   return (
-    <div className="shrink-0 rounded-2xl border border-status-rua/30 bg-status-rua/10 shadow-md overflow-hidden border-l-4 border-l-violet-500">
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Abrir ficha do pedido de ${nome}`}
+      onClick={() => onAbrirFicha(p)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onAbrirFicha(p); }
+      }}
+      className="group shrink-0 rounded-2xl border border-status-rua/30 bg-status-rua/10 shadow-md overflow-hidden border-l-4 border-l-violet-500 cursor-pointer transition-shadow hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-start justify-between gap-2">
-          <p className="text-lg font-bold text-foreground">{nome}</p>
-          {p.created_at && (
-            <span className="text-xs text-muted-foreground mt-1 shrink-0">{timeAgo(p.created_at)}</span>
-          )}
+          <div className="min-w-0">
+            <p className="text-lg font-bold text-foreground">{nome}</p>
+            <span className="text-[11px] font-mono text-muted-foreground">{pedidoNumero(p)}</span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-1 shrink-0">
+            {p.created_at && (
+              <span className="text-xs text-muted-foreground">{timeAgo(p.created_at)}</span>
+            )}
+            <FileText className="w-3.5 h-3.5 text-status-ink-rua opacity-40 group-hover:opacity-100 transition-opacity" />
+          </div>
         </div>
         {phone && (
           <a
             href={`https://wa.me/55${phone}`}
             target="_blank"
             rel="noreferrer"
+            onClick={pararPropagacao}
             className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 mt-1"
           >
             <Phone className="w-4 h-4" />{phone}
@@ -621,6 +610,7 @@ function NaRuaCard({
                 href={`https://wa.me/${entregador.telefone.replace(/\D/g, "")}`}
                 target="_blank"
                 rel="noreferrer"
+                onClick={pararPropagacao}
                 className="text-primary hover:text-primary/80"
               >
                 <Phone className="w-3.5 h-3.5" />
@@ -635,6 +625,7 @@ function NaRuaCard({
             href={enderecoLink ?? "#"}
             target="_blank"
             rel="noreferrer"
+            onClick={pararPropagacao}
             className="flex items-start gap-2 text-sm text-status-ink-novo hover:underline"
           >
             <MapPin className="w-4 h-4 mt-0.5 shrink-0" />
@@ -648,6 +639,7 @@ function NaRuaCard({
             href={locLink}
             target="_blank"
             rel="noreferrer"
+            onClick={pararPropagacao}
             className="flex items-center gap-1.5 text-xs text-status-ink-rua hover:underline"
           >
             <LocateFixed className="w-3.5 h-3.5" />GPS atual
@@ -695,18 +687,20 @@ function NaRuaCard({
         ) : null}
       </div>
 
-      {/* Confirmar entregue */}
-      <div className="px-4 pb-4">
-        <button
-          disabled={confirming}
-          onClick={handleConfirmar}
-          className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-status-entregue hover:bg-status-entregue text-white text-sm font-bold transition-colors disabled:opacity-60"
-        >
-          {confirming
-            ? <Loader2 className="w-4 h-4 animate-spin" />
-            : <><CheckCircle className="w-4 h-4" />Marcar como entregue</>}
-        </button>
-      </div>
+      {/* Confirmar entregue — escondido para entregador (aba só leitura) */}
+      {!readOnly && (
+        <div className="px-4 pb-4" onClick={pararPropagacao}>
+          <button
+            disabled={confirming}
+            onClick={handleConfirmar}
+            className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-status-entregue hover:bg-status-entregue text-white text-sm font-bold transition-colors disabled:opacity-60"
+          >
+            {confirming
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <><CheckCircle className="w-4 h-4" />Marcar como entregue</>}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -717,13 +711,20 @@ const TODOS_STATUS = COLUNAS.map((c) => c.status);
 const STATUS_ATIVOS_DEFAULT = ["novo", "em_separacao", "saiu_para_entrega"];
 
 export default function Pedidos() {
+  // O entregador enxerga a mesma fila do balcão, mas sem poder agir nela:
+  // baixa de estoque, confirmação e mudança de status continuam só do admin.
+  const { role } = useAuth();
+  const readOnly = role !== "admin";
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [entregadores, setEntregadores] = useState<EntregadorFull[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filtros, setFiltros] = useState<string[]>(STATUS_ATIVOS_DEFAULT);
-  const [aba, setAba] = useState<"kanban" | "na_rua">("kanban");
+  const [aba, setAba] = useState<"kanban" | "na_rua" | "historico">("kanban");
   const [despacharPedido, setDespacharPedido] = useState<Pedido | null>(null);
+  const [novoPedido, setNovoPedido] = useState(false);
+  // Ficha aberta: guardamos só o id para o card seguir vivo nos refreshes de 30s
+  const [fichaId, setFichaId] = useState<string | null>(null);
 
   function toggleFiltro(status: string) {
     setFiltros((prev) =>
@@ -737,9 +738,9 @@ export default function Pedidos() {
     const [{ data: pedidosData }, { data: entregadoresData }] = await Promise.all([
       externalSupabase
         .from("pedidos")
-        .select("*, clientes(nome, telefone), itens_pedido(item, quantidade), despacho_entrega(id, entregador_id, pagamento_recebido, saiu_em, chegou_em, localizacao, status_entrega)")
+        .select(PEDIDO_SELECT)
         .order("created_at", { ascending: false }),
-      externalSupabase.from("entregadores").select("*").eq("ativo", true),
+      externalSupabase.from("entregadores").select("*"),
     ]);
     setPedidos((pedidosData as unknown as Pedido[]) ?? []);
     setEntregadores((entregadoresData as EntregadorFull[]) ?? []);
@@ -790,6 +791,10 @@ export default function Pedidos() {
 
   const byStatus = (status: string) => pedidos.filter((p) => p.status === status);
   const naRua = pedidos.filter((p) => p.status === "saiu_para_entrega");
+  // Cards e ficha usam a lista toda (pedido antigo pode ter entregador já desativado);
+  // só o despacho oferece exclusivamente quem está ativo.
+  const entregadoresAtivos = entregadores.filter((e) => e.ativo);
+  const pedidoFicha = fichaId ? pedidos.find((p) => p.id === fichaId) ?? null : null;
 
   if (loading) {
     return (
@@ -804,8 +809,16 @@ export default function Pedidos() {
       {/* Header */}
       <div className="px-4 pt-5 pb-3 bg-background border-b border-border">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-2xl font-extrabold text-foreground">Pedidos</h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="text-2xl font-extrabold text-foreground">Pedidos</h1>
+            {readOnly && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary text-muted-foreground text-xs font-semibold shrink-0">
+                <Eye className="w-3.5 h-3.5" />
+                Somente leitura
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
             <button
               onClick={() => load(true)}
               disabled={refreshing}
@@ -814,6 +827,15 @@ export default function Pedidos() {
               <RefreshCw className={cn("w-4 h-4", refreshing && "animate-spin")} />
               <span className="hidden sm:inline">Atualizar</span>
             </button>
+            {!readOnly && (
+              <button
+                onClick={() => setNovoPedido(true)}
+                className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Novo pedido</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -845,6 +867,16 @@ export default function Pedidos() {
                 {naRua.length}
               </span>
             )}
+          </button>
+          <button
+            onClick={() => setAba("historico")}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
+              aba === "historico" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary"
+            )}
+          >
+            <History className="w-4 h-4" />
+            Histórico
           </button>
         </div>
       </div>
@@ -895,6 +927,8 @@ export default function Pedidos() {
                             entregadores={entregadores}
                             onStatusChange={handleStatusChange}
                             onDespachar={setDespacharPedido}
+                            onAbrirFicha={(pedido) => setFichaId(pedido.id)}
+                            readOnly={readOnly}
                           />
                         ))
                       )}
@@ -923,6 +957,8 @@ export default function Pedidos() {
                   p={p}
                   entregadores={entregadores}
                   onConfirmarEntrega={handleConfirmarEntrega}
+                  onAbrirFicha={(pedido) => setFichaId(pedido.id)}
+                  readOnly={readOnly}
                 />
               ))}
             </div>
@@ -930,12 +966,77 @@ export default function Pedidos() {
         </div>
       )}
 
+      {/* ── ABA HISTÓRICO ── */}
+      {/* Veio do Dashboard, que foi removido: a lista corrida de pedidos por data,
+          útil para achar um pedido antigo sem depender das colunas do Kanban. */}
+      {aba === "historico" && (
+        <div className="flex-1 overflow-y-auto p-4">
+          {pedidos.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
+              <History className="w-10 h-10 opacity-30" />
+              <p className="text-sm">Nenhum pedido registrado</p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-w-3xl mx-auto">
+              {pedidos.map((p) => {
+                const cfg = statusConfig(p.status);
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setFichaId(p.id)}
+                    className="w-full text-left bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3 shadow-card hover:bg-secondary transition-colors"
+                  >
+                    <div className={cn("shrink-0 w-9 h-9 rounded-lg border flex items-center justify-center", cfg.pill)}>
+                      <cfg.Icon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {p.clientes?.nome ?? p.clientes?.telefone ?? "—"}
+                      </p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                        <Clock className="w-3 h-3" />
+                        {p.created_at ? format(new Date(p.created_at), "dd/MM HH:mm", { locale: ptBR }) : "—"}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0 space-y-1">
+                      {p.valor_total != null && (
+                        <p className={cn("text-sm", moneyClass(p.valor_total))}>{brl(p.valor_total)}</p>
+                      )}
+                      <span className={cn("inline-block text-xs px-2 py-0.5 rounded-full border font-semibold", cfg.pill)}>
+                        {cfg.plural}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Modais */}
 
-      {despacharPedido && (
+      {pedidoFicha && (
+        <FichaPedido
+          pedido={pedidoFicha}
+          entregadores={entregadores}
+          open={!!pedidoFicha}
+          onClose={() => setFichaId(null)}
+        />
+      )}
+
+      {novoPedido && !readOnly && (
+        <NovoPedidoModal
+          open={novoPedido}
+          onClose={() => setNovoPedido(false)}
+          onDone={() => load(true)}
+        />
+      )}
+
+      {despacharPedido && !readOnly && (
         <DespacharModal
           pedido={despacharPedido}
-          entregadores={entregadores}
+          entregadores={entregadoresAtivos}
           open={!!despacharPedido}
           onClose={() => setDespacharPedido(null)}
           onDone={() => load(true)}
