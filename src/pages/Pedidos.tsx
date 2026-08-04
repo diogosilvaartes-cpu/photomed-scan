@@ -714,6 +714,7 @@ export default function Pedidos() {
   // O entregador enxerga a mesma fila do balcão, mas sem poder agir nela:
   // baixa de estoque, confirmação e mudança de status continuam só do admin.
   const { role } = useAuth();
+  const { toast } = useToast();
   const readOnly = role !== "admin";
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [entregadores, setEntregadores] = useState<EntregadorFull[]>([]);
@@ -755,21 +756,35 @@ export default function Pedidos() {
     setRefreshing(false);
   }
 
+  // Falha de WhatsApp precisa aparecer na tela: foi o `catch {}` mudo aqui que
+  // escondeu por semanas uma instância Z-API morta. Mesma regra do painel do entregador.
   async function notifyWhatsApp(phone: string, message: string) {
     try {
-      await fetch("/api/notify-client", {
+      const r = await fetch("/api/notify-client", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: phone.replace(/\D/g, ""), message }),
       });
-    } catch { /* notificação silenciosa */ }
+      if (!r.ok) throw new Error(String(r.status));
+    } catch {
+      toast({
+        title: "Cliente não foi avisado",
+        description: "O status foi salvo, mas o WhatsApp não saiu.",
+        variant: "destructive",
+      });
+    }
   }
 
   async function handleStatusChange(id: string, newStatus: string) {
+    // O card do Kanban também tem "Confirmar Entrega" (NEXT_NORMAL.saiu_para_entrega).
+    // Sem este desvio ele fechava o pedido por fora: sem avisar o cliente e sem baixar
+    // o despacho_entrega — só a aba "Na rua" fazia certo, com o mesmo rótulo de botão.
+    if (newStatus === "entregue") {
+      await handleConfirmarEntrega(id);
+      return;
+    }
     await externalSupabase.from("pedidos").update({ status: newStatus }).eq("id", id);
     setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
-
-    const pedido = pedidos.find((p) => p.id === id);
   }
 
   async function handleConfirmarEntrega(id: string) {
