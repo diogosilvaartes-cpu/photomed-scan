@@ -10,9 +10,9 @@ const links = [
 
 export default function Navbar() {
   return (
-    <nav className="fixed top-0 inset-x-0 z-40 h-14 bg-white border-b border-gray-200 shadow-sm flex items-center px-4 gap-1">
-      <span className="text-blue-700 font-bold text-lg mr-4 tracking-tight select-none">
-        Med<span className="text-gray-800">Scan</span>
+    <nav className="fixed top-0 inset-x-0 z-40 h-14 bg-white border-b border-border shadow-sm flex items-center px-4 gap-1">
+      <span className="text-status-ink-novo font-bold text-lg mr-4 tracking-tight select-none">
+        Med<span className="text-foreground">Scan</span>
       </span>
       <div className="flex items-center gap-1">
         {links.map(({ to, label, icon: Icon, end }) => (
@@ -24,8 +24,8 @@ export default function Navbar() {
               cn(
                 "flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-medium transition-colors",
                 isActive
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "text-gray-600 hover:bg-gray-100"
+                  ? "bg-primary text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-muted"
               )
             }
           >

@@ -13,6 +13,7 @@ import Pedidos from "./pages/Pedidos.tsx";
 import Login from "./pages/Login.tsx";
 import Clientes from "./pages/Clientes.tsx";
 import Entregas from "./pages/Entregas.tsx";
+import Entregadores from "./pages/Entregadores.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,7 @@ function AppRoutes() {
       <Route path="/pedidos" element={<ProtectedRoute adminOnly><Pedidos /></ProtectedRoute>} />
       <Route path="/clientes" element={<ProtectedRoute><Clientes /></ProtectedRoute>} />
       <Route path="/entregas" element={<ProtectedRoute><Entregas /></ProtectedRoute>} />
+      <Route path="/entregadores" element={<ProtectedRoute adminOnly><Entregadores /></ProtectedRoute>} />
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
       <Route path="*" element={<NotFound />} />
     </Routes>

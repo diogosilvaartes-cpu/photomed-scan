@@ -1,17 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, TrendingUp, ShoppingBag, Truck, CheckCircle, Clock, AlertCircle } from "lucide-react";
+import { Loader2, TrendingUp, ShoppingBag, Truck, CircleCheckBig, Clock, type LucideIcon } from "lucide-react";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { format, startOfDay, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-
-const STATUS_CONFIG: Record<string, { label: string; emoji: string; color: string }> = {
-  novo:              { label: "Novos",      emoji: "🆕", color: "bg-blue-50 text-blue-700 border-blue-200" },
-  em_separacao:      { label: "Separação",  emoji: "📦", color: "bg-amber-50 text-amber-700 border-amber-200" },
-  saiu_para_entrega: { label: "Na rua",     emoji: "🛵", color: "bg-violet-50 text-violet-700 border-violet-200" },
-  entregue:          { label: "Entregues",  emoji: "✅", color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  cancelado:         { label: "Cancelados", emoji: "❌", color: "bg-red-50 text-red-700 border-red-200" },
-};
+import { STATUS, STATUS_ORDER, STATUS_ATIVOS, statusConfig, brl, moneyClass, type PedidoStatus } from "@/lib/status";
 
 async function fetchDashboard() {
   const hoje = new Date();
@@ -24,7 +17,7 @@ async function fetchDashboard() {
   ]);
 
   const porStatus = Object.fromEntries(
-    Object.keys(STATUS_CONFIG).map((s) => [s, (todos ?? []).filter((p) => p.status === s).length])
+    STATUS_ORDER.map((s) => [s, (todos ?? []).filter((p) => p.status === s).length])
   );
 
   const totalFaturado = (todos ?? [])
@@ -36,7 +29,7 @@ async function fetchDashboard() {
     .reduce((s, p) => s + (p.valor_total ?? 0), 0);
 
   const pedidosHoje = hoje_data?.length ?? 0;
-  const emAndamento = (todos ?? []).filter((p) => ["novo", "em_separacao", "saiu_para_entrega"].includes(p.status ?? "")).length;
+  const emAndamento = (todos ?? []).filter((p) => STATUS_ATIVOS.includes(p.status as PedidoStatus)).length;
 
   return { porStatus, totalFaturado, faturadoHoje, pedidosHoje, emAndamento };
 }
@@ -50,16 +43,26 @@ async function fetchUltimosPedidos() {
   return data ?? [];
 }
 
-function StatCard({ icon, label, value, sub, color }: {
-  icon: React.ReactNode; label: string; value: string; sub?: string; color: string;
+/** Card de métrica — os quatro têm estrutura e alinhamento idênticos. */
+function StatCard({ Icon, iconClass, label, value, valueClass, sub }: {
+  Icon: LucideIcon;
+  iconClass: string;
+  label: string;
+  value: string;
+  valueClass?: string;
+  sub?: string;
 }) {
   return (
-    <div className={cn("rounded-2xl border p-4 flex items-center gap-4", color)}>
-      <div className="shrink-0">{icon}</div>
-      <div className="min-w-0">
-        <p className="text-xs font-medium opacity-70 truncate">{label}</p>
-        <p className="text-2xl font-extrabold leading-tight">{value}</p>
-        {sub && <p className="text-xs opacity-60 mt-0.5">{sub}</p>}
+    <div className="bg-card border border-border rounded-2xl p-4 shadow-card flex items-start gap-3">
+      <div className={cn("shrink-0 w-10 h-10 rounded-xl flex items-center justify-center", iconClass)}>
+        <Icon className="w-5 h-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-muted-foreground truncate">{label}</p>
+        <p className={cn("font-display text-2xl font-extrabold leading-tight tabular mt-0.5", valueClass ?? "text-foreground")}>
+          {value}
+        </p>
+        {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
       </div>
     </div>
   );
@@ -83,80 +86,99 @@ export default function Dashboard() {
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        <h1 className="font-display text-3xl font-extrabold text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground capitalize mt-0.5">{hoje}</p>
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+        <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
       ) : (
         <>
-          {/* Cards de destaque */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {/* Métricas */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
             <StatCard
-              icon={<ShoppingBag className="w-7 h-7 text-blue-600" />}
+              Icon={ShoppingBag}
+              iconClass="bg-status-novo/10 text-status-ink-novo"
               label="Pedidos hoje"
               value={String(data?.pedidosHoje ?? 0)}
-              color="bg-blue-50 border-blue-200 text-blue-900"
             />
             <StatCard
-              icon={<Truck className="w-7 h-7 text-violet-600" />}
+              Icon={Truck}
+              iconClass="bg-status-rua/10 text-status-ink-rua"
               label="Em andamento"
               value={String(data?.emAndamento ?? 0)}
-              color="bg-violet-50 border-violet-200 text-violet-900"
             />
             <StatCard
-              icon={<TrendingUp className="w-7 h-7 text-emerald-600" />}
+              Icon={TrendingUp}
+              iconClass="bg-money/10 text-money"
               label="Faturado hoje"
-              value={`R$ ${(data?.faturadoHoje ?? 0).toFixed(2)}`}
-              color="bg-emerald-50 border-emerald-200 text-emerald-900"
+              value={brl(data?.faturadoHoje ?? 0)}
+              valueClass={moneyClass(data?.faturadoHoje)}
             />
             <StatCard
-              icon={<CheckCircle className="w-7 h-7 text-green-600" />}
+              Icon={CircleCheckBig}
+              iconClass="bg-primary/10 text-primary"
               label="Total faturado"
               value={`R$ ${(data?.totalFaturado ?? 0).toFixed(0)}`}
+              valueClass={moneyClass(data?.totalFaturado)}
               sub="todos os tempos"
-              color="bg-green-50 border-green-200 text-green-900"
             />
           </div>
 
-          {/* Pedidos por status */}
-          <div className="mb-6">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Status atual</h2>
+          {/* Status atual */}
+          <div className="mb-8">
+            <h2 className="section-title">Status atual</h2>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {Object.entries(STATUS_CONFIG).map(([status, cfg]) => (
-                <div key={status} className={cn("rounded-xl border px-4 py-3 flex items-center gap-2", cfg.color)}>
-                  <span className="text-lg">{cfg.emoji}</span>
-                  <div>
-                    <p className="text-xs opacity-70">{cfg.label}</p>
-                    <p className="text-xl font-bold">{data?.porStatus[status] ?? 0}</p>
+              {STATUS_ORDER.map((status) => {
+                const cfg = STATUS[status];
+                return (
+                  <div
+                    key={status}
+                    className={cn("rounded-xl border px-3 py-3 flex items-center gap-2.5", cfg.pill)}
+                  >
+                    <cfg.Icon className="w-5 h-5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold truncate">{cfg.plural}</p>
+                      <p className="font-display text-xl font-extrabold leading-tight tabular">
+                        {data?.porStatus[status] ?? 0}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
           {/* Últimos pedidos */}
           <div>
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Últimos pedidos</h2>
+            <h2 className="section-title">Últimos pedidos</h2>
             <div className="space-y-2">
               {(ultimos ?? []).map((p: any) => {
-                const cfg = STATUS_CONFIG[p.status] ?? { label: p.status, emoji: "•", color: "bg-secondary border-border text-foreground" };
+                const cfg = statusConfig(p.status);
                 return (
-                  <div key={p.id} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3">
-                    <span className="text-base shrink-0">{cfg.emoji}</span>
+                  <div
+                    key={p.id}
+                    className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3 shadow-card"
+                  >
+                    <div className={cn("shrink-0 w-9 h-9 rounded-lg border flex items-center justify-center", cfg.pill)}>
+                      <cfg.Icon className="w-4 h-4" />
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{p.clientes?.nome ?? p.clientes?.telefone ?? "—"}</p>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {p.clientes?.nome ?? p.clientes?.telefone ?? "—"}
+                      </p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                         <Clock className="w-3 h-3" />
                         {format(new Date(p.created_at), "dd/MM HH:mm", { locale: ptBR })}
                       </p>
                     </div>
-                    <div className="text-right shrink-0">
+                    <div className="text-right shrink-0 space-y-1">
                       {p.valor_total != null && (
-                        <p className="text-sm font-semibold">R$ {p.valor_total.toFixed(2)}</p>
+                        <p className={cn("text-sm", moneyClass(p.valor_total))}>{brl(p.valor_total)}</p>
                       )}
-                      <span className={cn("text-xs px-2 py-0.5 rounded-full border font-medium", cfg.color)}>{cfg.label}</span>
+                      <span className={cn("inline-block text-xs px-2 py-0.5 rounded-full border font-semibold", cfg.pill)}>
+                        {cfg.plural}
+                      </span>
                     </div>
                   </div>
                 );

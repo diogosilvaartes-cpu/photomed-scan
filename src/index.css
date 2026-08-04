@@ -1,90 +1,145 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* MedScan Design System */
+/* ============================================================
+   Farmácia Vital — Design System
+   Identidade "verde-clínico": clínico, confiável, caloroso.
+   ============================================================ */
 
 @layer base {
   :root {
-    /* Core surfaces */
-    --background: 210 40% 98%;
-    --foreground: 215 50% 18%;
+    /* Superfícies */
+    --background: 150 14% 97%;      /* off-white #F7F9F8 */
+    --foreground: 201 58% 10%;      /* azul-tinta #0B1F2A */
 
     --card: 0 0% 100%;
-    --card-foreground: 215 50% 18%;
+    --card-foreground: 201 58% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 215 50% 18%;
+    --popover-foreground: 201 58% 10%;
 
-    /* Medical Blue — primary CTA */
-    --primary: 199 89% 48%;
+    /* Primário — verde-clínico profundo #0D6E6E */
+    --primary: 180 79% 24%;
     --primary-foreground: 0 0% 100%;
 
-    /* Confidence Green — save action */
-    --success: 160 71% 38%;
+    /* Confirmação — verde #16A34A (fundos, preenchimentos, ícones grandes) */
+    --success: 142 76% 36%;
     --success-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 215 50% 18%;
+    /* Dinheiro — verde escurecido para 5.8:1 sobre card branco.
+       O #16A34A dá só 3.35:1 e reprova em AA nos valores de 14px
+       (lista de pedidos e o "a receber" da tela do entregador, lida sob sol). */
+    --money: 142 76% 26%;
 
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 25% 50%;
+    /* Atenção #F59E0B */
+    --warning: 38 92% 50%;
+    --warning-foreground: 30 80% 15%;
 
-    --accent: 199 89% 95%;
-    --accent-foreground: 199 89% 30%;
+    --secondary: 165 16% 94%;
+    --secondary-foreground: 201 58% 10%;
 
-    --destructive: 0 84.2% 60.2%;
+    --muted: 165 16% 94%;
+    --muted-foreground: 204 9% 41%;  /* cinza-azulado #5A6B76 */
+
+    --accent: 180 40% 94%;
+    --accent-foreground: 180 79% 20%;
+
+    --destructive: 358 75% 59%;      /* coral #E5484D */
     --destructive-foreground: 0 0% 100%;
 
-    /* Border / input — Soft Silver */
-    --border: 213 27% 80%;
-    --input: 213 27% 80%;
-    --ring: 199 89% 48%;
+    --border: 180 8% 89%;
+    --input: 180 8% 87%;
+    --ring: 180 79% 24%;
 
-    --radius: 0.75rem;
+    --radius: 0.75rem;               /* 12px */
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Status do pedido — cor + ícone + rótulo (ver src/lib/status.ts) */
+    --status-novo: 217 91% 60%;         /* azul   #3B82F6 */
+    --status-separacao: 38 92% 50%;     /* âmbar  #F59E0B */
+    --status-rua: 252 100% 68%;         /* violeta #7C5CFF */
+    --status-entregue: 142 76% 36%;     /* verde  #16A34A */
+    --status-cancelado: 358 75% 59%;    /* coral  #E5484D */
+
+    /* Variante escura para TEXTO e ÍCONE sobre o fundo suave da pastilha.
+       A cor viva acima reprova em contraste quando usada como texto —
+       principalmente o âmbar. Estas passam em WCAG AA (>= 4.5:1). */
+    --status-novo-ink: 217 72% 40%;
+    --status-separacao-ink: 28 88% 31%;
+    --status-rua-ink: 252 62% 48%;
+    --status-entregue-ink: 142 72% 26%;
+    --status-cancelado-ink: 358 62% 42%;
+
+    /* Sidebar — verde profundo */
+    --sidebar-background: 173 62% 10%;
+    --sidebar-foreground: 165 25% 82%;
+    --sidebar-primary: 180 55% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 174 45% 16%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 174 35% 18%;
+    --sidebar-ring: 180 55% 45%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 199 89% 48%;
-    --primary-foreground: 0 0% 100%;
-    --success: 160 71% 38%;
-    --success-foreground: 0 0% 100%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 199 89% 48%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --background: 195 40% 7%;
+    --foreground: 165 20% 94%;
+
+    --card: 197 34% 10%;
+    --card-foreground: 165 20% 94%;
+
+    --popover: 197 34% 10%;
+    --popover-foreground: 165 20% 94%;
+
+    --primary: 180 55% 42%;
+    --primary-foreground: 195 40% 7%;
+
+    --success: 142 60% 45%;
+    --success-foreground: 195 40% 7%;
+    --money: 142 62% 52%;
+
+    --warning: 38 90% 58%;
+    --warning-foreground: 30 80% 12%;
+
+    --secondary: 197 28% 16%;
+    --secondary-foreground: 165 20% 94%;
+
+    --muted: 197 28% 16%;
+    --muted-foreground: 190 12% 62%;
+
+    --accent: 180 35% 18%;
+    --accent-foreground: 165 30% 90%;
+
+    --destructive: 358 70% 62%;
+    --destructive-foreground: 195 40% 7%;
+
+    --border: 197 25% 19%;
+    --input: 197 25% 22%;
+    --ring: 180 55% 42%;
+
+    --status-novo: 217 88% 66%;
+    --status-separacao: 38 88% 58%;
+    --status-rua: 252 95% 74%;
+    --status-entregue: 142 62% 50%;
+    --status-cancelado: 358 72% 65%;
+
+    /* No escuro a pastilha inverte: texto CLARO sobre fundo suave. */
+    --status-novo-ink: 217 90% 76%;
+    --status-separacao-ink: 38 92% 68%;
+    --status-rua-ink: 252 95% 82%;
+    --status-entregue-ink: 142 60% 62%;
+    --status-cancelado-ink: 358 85% 76%;
+
+    --sidebar-background: 196 42% 8%;
+    --sidebar-foreground: 165 20% 80%;
+    --sidebar-primary: 180 55% 45%;
+    --sidebar-primary-foreground: 195 40% 7%;
+    --sidebar-accent: 180 30% 15%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 197 25% 17%;
+    --sidebar-ring: 180 55% 45%;
   }
 }
 
@@ -94,29 +149,47 @@
   }
 
   body {
-    @apply text-foreground;
-    font-family: 'Inter', sans-serif;
-    /* Checker background — alternating squares ~50% darker than the base */
-    background-color: hsl(210 30% 88%);
-    background-image:
-      linear-gradient(45deg, hsl(210 30% 82%) 25%, transparent 25%),
-      linear-gradient(-45deg, hsl(210 30% 82%) 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, hsl(210 30% 82%) 75%),
-      linear-gradient(-45deg, transparent 75%, hsl(210 30% 82%) 75%);
-    background-size: 32px 32px;
-    background-position: 0 0, 0 16px, 16px -16px, -16px 0px;
-    background-attachment: fixed;
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  /* Números sempre alinhados em colunas (tabelas, valores, contadores) */
+  .tabular,
+  th,
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1, h2, h3 {
+    font-family: 'Bricolage Grotesque', 'Inter', sans-serif;
+    letter-spacing: -0.02em;
   }
 }
 
 @layer utilities {
   .shadow-card {
-    box-shadow: 0 1px 3px 0 hsl(215 50% 18% / 0.06), 0 4px 16px -4px hsl(215 50% 18% / 0.08);
+    box-shadow:
+      0 1px 2px 0 hsl(201 58% 10% / 0.04),
+      0 4px 12px -4px hsl(201 58% 10% / 0.07);
+  }
+  .shadow-card-hover {
+    box-shadow:
+      0 2px 4px 0 hsl(201 58% 10% / 0.06),
+      0 8px 24px -6px hsl(201 58% 10% / 0.12);
   }
   .input-med {
-    @apply h-12 rounded-xl border-border bg-background text-foreground placeholder:text-muted-foreground focus-visible:ring-primary;
+    @apply h-12 rounded-xl border-border bg-card text-foreground placeholder:text-muted-foreground focus-visible:ring-primary;
   }
   .text-label {
     @apply text-sm font-medium text-foreground;
+  }
+  /* Título de seção: "STATUS ATUAL", "ÚLTIMOS PEDIDOS" */
+  .section-title {
+    @apply text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3;
+  }
+  /* Valor monetário em destaque */
+  .money {
+    @apply text-money font-bold tabular;
   }
 }

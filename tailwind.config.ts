@@ -1,5 +1,8 @@
 import type { Config } from "tailwindcss";
 
+/** Token HSL com suporte a modificador de opacidade (bg-primary/10). */
+const hsl = (v: string) => `hsl(var(${v}) / <alpha-value>)`;
+
 export default {
   darkMode: ["class"],
   content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
@@ -14,64 +17,93 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ["Inter", "sans-serif"],
+        sans: ["Inter", "system-ui", "sans-serif"],
+        display: ["Bricolage Grotesque", "Inter", "sans-serif"],
       },
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
-        surface: "hsl(var(--background))",
-        silver: "hsl(var(--border))",
-        medical: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
-        },
-        success: {
-          DEFAULT: "hsl(var(--success))",
-          foreground: "hsl(var(--success-foreground))",
-        },
-        "slate-deep": "hsl(var(--foreground))",
-        "slate-muted": "hsl(var(--muted-foreground))",
+        border: hsl("--border"),
+        input: hsl("--input"),
+        ring: hsl("--ring"),
+        background: hsl("--background"),
+        foreground: hsl("--foreground"),
+
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: hsl("--primary"),
+          foreground: hsl("--primary-foreground"),
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: hsl("--secondary"),
+          foreground: hsl("--secondary-foreground"),
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: hsl("--destructive"),
+          foreground: hsl("--destructive-foreground"),
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: hsl("--muted"),
+          foreground: hsl("--muted-foreground"),
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: hsl("--accent"),
+          foreground: hsl("--accent-foreground"),
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: hsl("--popover"),
+          foreground: hsl("--popover-foreground"),
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: hsl("--card"),
+          foreground: hsl("--card-foreground"),
         },
+
+        success: {
+          DEFAULT: hsl("--success"),
+          foreground: hsl("--success-foreground"),
+        },
+        warning: {
+          DEFAULT: hsl("--warning"),
+          foreground: hsl("--warning-foreground"),
+        },
+        /** Dinheiro — sempre em destaque quando > 0 */
+        money: hsl("--money"),
+
+        /** Status do pedido — cor viva: fundos suaves, faixas e preenchimentos */
+        status: {
+          novo: hsl("--status-novo"),
+          separacao: hsl("--status-separacao"),
+          rua: hsl("--status-rua"),
+          entregue: hsl("--status-entregue"),
+          cancelado: hsl("--status-cancelado"),
+        },
+        /** Variante escura — usar SEMPRE que a cor virar texto ou ícone (WCAG AA) */
+        "status-ink": {
+          novo: hsl("--status-novo-ink"),
+          separacao: hsl("--status-separacao-ink"),
+          rua: hsl("--status-rua-ink"),
+          entregue: hsl("--status-entregue-ink"),
+          cancelado: hsl("--status-cancelado-ink"),
+        },
+
         sidebar: {
-          DEFAULT: "hsl(var(--sidebar-background))",
-          foreground: "hsl(var(--sidebar-foreground))",
-          primary: "hsl(var(--sidebar-primary))",
-          "primary-foreground": "hsl(var(--sidebar-primary-foreground))",
-          accent: "hsl(var(--sidebar-accent))",
-          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
-          border: "hsl(var(--sidebar-border))",
-          ring: "hsl(var(--sidebar-ring))",
+          DEFAULT: hsl("--sidebar-background"),
+          foreground: hsl("--sidebar-foreground"),
+          primary: hsl("--sidebar-primary"),
+          "primary-foreground": hsl("--sidebar-primary-foreground"),
+          accent: hsl("--sidebar-accent"),
+          "accent-foreground": hsl("--sidebar-accent-foreground"),
+          border: hsl("--sidebar-border"),
+          ring: hsl("--sidebar-ring"),
         },
+
+        /* Aliases legados mantidos para não quebrar telas ainda não migradas */
+        surface: hsl("--background"),
+        silver: hsl("--border"),
+        medical: {
+          DEFAULT: hsl("--primary"),
+          foreground: hsl("--primary-foreground"),
+        },
+        "slate-deep": hsl("--foreground"),
+        "slate-muted": hsl("--muted-foreground"),
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -89,10 +121,15 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        "fade-in": {
+          from: { opacity: "0", transform: "translateY(4px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "fade-in": "fade-in 0.2s ease-out",
       },
     },
   },

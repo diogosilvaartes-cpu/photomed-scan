@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, User, Phone, MapPin, ShoppingBag, MessageSquare,
-  ChevronRight, Loader2, Plus, X
+  ChevronRight, Loader2, Plus, X, Camera, Navigation
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,11 +22,11 @@ const ZAPI_BASE = "https://api.z-api.io/instances/3F083119DA06B00D1DE5BE013F70DD
 const ZAPI_CLIENT_TOKEN = "F703bb4394f324fb580948f20d063be15S";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  novo: { label: "Novo", color: "bg-blue-100 text-blue-700" },
-  em_separacao: { label: "Em separação", color: "bg-orange-100 text-orange-700" },
-  saiu_para_entrega: { label: "Saiu p/ entrega", color: "bg-purple-100 text-purple-700" },
-  entregue: { label: "Entregue", color: "bg-green-100 text-green-700" },
-  cancelado: { label: "Cancelado", color: "bg-red-100 text-red-700" },
+  novo: { label: "Novo", color: "bg-status-novo/15 text-status-ink-novo" },
+  em_separacao: { label: "Em separação", color: "bg-status-separacao/15 text-status-ink-separacao" },
+  saiu_para_entrega: { label: "Saiu p/ entrega", color: "bg-status-rua/15 text-status-ink-rua" },
+  entregue: { label: "Entregue", color: "bg-status-entregue/15 text-status-ink-entregue" },
+  cancelado: { label: "Cancelado", color: "bg-status-cancelado/15 text-status-ink-cancelado" },
 };
 
 type Cliente = {
@@ -36,10 +36,20 @@ type Cliente = {
   endereco: string | null;
   enderecos: string[] | null;
   foto_url: string | null;
+  fotos_entregador: string[] | null;
   observacoes: string | null;
   anotacoes_entregador: string | null;
   created_at: string;
 };
+
+type EnderecoGPS = {
+  id: string;
+  label_exibicao: string | null;
+  rua: string | null;
+  latitude: number | null;
+  longitude: number | null;
+};
+
 
 type Pedido = {
   id: string;
@@ -60,6 +70,17 @@ async function fetchClientes(search: string): Promise<Cliente[]> {
   return data ?? [];
 }
 
+async function fetchEnderecosGPS(clienteId: string): Promise<EnderecoGPS[]> {
+  const { data, error } = await externalSupabase
+    .from("enderecos")
+    .select("id, label_exibicao, rua, latitude, longitude")
+    .eq("cliente_id", clienteId)
+    .not("latitude", "is", null);
+  if (error) throw error;
+  return data ?? [];
+}
+
+
 async function fetchPedidosCliente(clienteId: string): Promise<Pedido[]> {
   const { data, error } = await externalSupabase
     .from("pedidos").select("*, itens_pedido(*)")
@@ -69,7 +90,7 @@ async function fetchPedidosCliente(clienteId: string): Promise<Pedido[]> {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_LABELS[status] ?? { label: status, color: "bg-gray-100 text-gray-700" };
+  const s = STATUS_LABELS[status] ?? { label: status, color: "bg-muted text-foreground" };
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${s.color}`}>{s.label}</span>;
 }
 
@@ -96,6 +117,8 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
   const { role } = useAuth();
   const [obs, setObs] = useState(cliente?.observacoes ?? "");
   const [anotacoes, setAnotacoes] = useState(cliente?.anotacoes_entregador ?? "");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setObs(cliente?.observacoes ?? "");
     setAnotacoes(cliente?.anotacoes_entregador ?? "");
@@ -106,6 +129,13 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
     queryFn: () => fetchPedidosCliente(cliente!.id),
     enabled: !!cliente?.id && open,
   });
+
+  const { data: enderecosGPS } = useQuery({
+    queryKey: ["enderecos-gps", cliente?.id],
+    queryFn: () => fetchEnderecosGPS(cliente!.id),
+    enabled: !!cliente?.id && open,
+  });
+
 
   const updateObs = useMutation({
     mutationFn: async (v: string) => {
@@ -124,6 +154,41 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
     onSuccess: () => { toast({ title: "Anotações salvas" }); qc.invalidateQueries({ queryKey: ["clientes"] }); },
     onError: () => toast({ title: "Erro ao salvar", variant: "destructive" }),
   });
+
+  async function handleUploadFoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !cliente) return;
+    setUploadingPhoto(true);
+    try {
+      const ext = file.name.split(".").pop() ?? "jpg";
+      const filePath = `clientes/${cliente.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await externalSupabase.storage.from("entregas").upload(filePath, file, { upsert: true });
+      if (upErr) throw upErr;
+      const { data: urlData } = externalSupabase.storage.from("entregas").getPublicUrl(filePath);
+      const publicUrl = urlData.publicUrl;
+      const existing = cliente.fotos_entregador ?? [];
+      const { error: patchErr } = await externalSupabase.from("clientes")
+        .update({ fotos_entregador: [...existing, publicUrl] }).eq("id", cliente.id);
+      if (patchErr) throw patchErr;
+      toast({ title: "Foto adicionada" });
+      qc.invalidateQueries({ queryKey: ["clientes"] });
+    } catch (err: any) {
+      toast({ title: "Erro ao enviar foto: " + err.message, variant: "destructive" });
+    } finally {
+      setUploadingPhoto(false);
+      if (fotoInputRef.current) fotoInputRef.current.value = "";
+    }
+  }
+
+  async function handleRemoveFoto(url: string) {
+    if (!cliente) return;
+    const updated = (cliente.fotos_entregador ?? []).filter(f => f !== url);
+    const { error } = await externalSupabase.from("clientes")
+      .update({ fotos_entregador: updated }).eq("id", cliente.id);
+    if (error) { toast({ title: "Erro ao remover foto", variant: "destructive" }); return; }
+    toast({ title: "Foto removida" });
+    qc.invalidateQueries({ queryKey: ["clientes"] });
+  }
 
   if (!cliente) return null;
 
@@ -153,6 +218,15 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
               <MapPin className="w-4 h-4 shrink-0 mt-0.5" /><span>{end}</span>
             </div>
           ))}
+          {enderecosGPS?.map((e) => (
+            <a key={e.id}
+              href={`https://maps.google.com/?q=${e.latitude},${e.longitude}`}
+              target="_blank" rel="noreferrer"
+              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline">
+              <Navigation className="w-4 h-4 shrink-0" />
+              <span>{e.label_exibicao || `${e.latitude}, ${e.longitude}`}</span>
+            </a>
+          ))}
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <ShoppingBag className="w-4 h-4 shrink-0" />
             <span>{pedidos?.length ?? 0} pedido(s) · R$ {totalGasto.toFixed(2)}</span>
@@ -172,6 +246,7 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
           </Button>
         </div>
 
+
         <Separator className="my-4" />
 
         {/* Observações do admin */}
@@ -185,19 +260,49 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
           </div>
         )}
         {role !== "admin" && obs && (
-          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+          <div className="mb-4 bg-status-separacao/10 border border-status-separacao/30 rounded-lg px-3 py-2 text-xs text-status-ink-separacao">
             <p className="font-semibold mb-0.5">Obs. farmácia:</p>
             <p>{obs}</p>
           </div>
         )}
 
         {/* Anotações do entregador */}
-        <div className="space-y-2 mb-6">
+        <div className="space-y-2 mb-4">
           <Label>Anotações do entregador</Label>
           <Textarea value={anotacoes} onChange={(e) => setAnotacoes(e.target.value)} placeholder="Referências, dificuldades de localização, portaria, etc..." rows={3} className="resize-none" />
           <Button size="sm" onClick={() => updateAnotacoes.mutate(anotacoes)} disabled={updateAnotacoes.isPending}>
             {updateAnotacoes.isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />} Salvar
           </Button>
+        </div>
+
+        {/* Fotos do entregador */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <Label>Fotos de referência</Label>
+            <Button size="sm" variant="outline" onClick={() => fotoInputRef.current?.click()} disabled={uploadingPhoto}>
+              {uploadingPhoto ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5 mr-1" />}
+              Adicionar foto
+            </Button>
+            <input ref={fotoInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadFoto} />
+          </div>
+          {(cliente.fotos_entregador?.length ?? 0) > 0 ? (
+            <div className="flex gap-2 flex-wrap">
+              {cliente.fotos_entregador!.map((url, i) => (
+                <div key={i} className="relative group">
+                  <a href={url} target="_blank" rel="noreferrer">
+                    <img src={url} alt={`foto ${i + 1}`} className="w-20 h-20 object-cover rounded-lg border border-border" />
+                  </a>
+                  <button
+                    onClick={() => handleRemoveFoto(url)}
+                    className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-white rounded-full items-center justify-center hidden group-hover:flex">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Nenhuma foto adicionada.</p>
+          )}
         </div>
 
         <Separator className="my-4" />
@@ -273,7 +378,7 @@ function ClienteModal({ open, onClose, cliente }: { open: boolean; onClose: () =
       try {
         const res = await fetch(`${ZAPI_BASE}/profile-picture?phone=${digits}`, { headers: { "Client-Token": ZAPI_CLIENT_TOKEN } });
         const data = await res.json();
-        if (data?.value) setFotoUrl(data.value);
+        if (data?.link) setFotoUrl(data.link);
       } catch { /* silent */ } finally { setFetchingPhoto(false); }
     }, 800);
   }

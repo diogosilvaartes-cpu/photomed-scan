@@ -31,17 +31,17 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  novo: { label: "Novo", color: "bg-blue-100 text-blue-700 border-blue-200" },
-  confirmado: { label: "Confirmado", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
-  em_separacao: { label: "Em separação", color: "bg-orange-100 text-orange-700 border-orange-200" },
-  saiu_para_entrega: { label: "Saiu p/ entrega", color: "bg-purple-100 text-purple-700 border-purple-200" },
-  entregue: { label: "Entregue", color: "bg-green-100 text-green-700 border-green-200" },
-  cancelado: { label: "Cancelado", color: "bg-red-100 text-red-700 border-red-200" },
+  novo: { label: "Novo", color: "bg-status-novo/10 text-status-ink-novo border-status-novo/30" },
+  confirmado: { label: "Confirmado", color: "bg-primary/10 text-primary border-primary/30" },
+  em_separacao: { label: "Em separação", color: "bg-status-separacao/10 text-status-ink-separacao border-status-separacao/30" },
+  saiu_para_entrega: { label: "Saiu p/ entrega", color: "bg-status-rua/10 text-status-ink-rua border-status-rua/30" },
+  entregue: { label: "Entregue", color: "bg-status-entregue/10 text-status-ink-entregue border-status-entregue/30" },
+  cancelado: { label: "Cancelado", color: "bg-status-cancelado/10 text-status-ink-cancelado border-status-cancelado/30" },
 };
 
 const STATUS_ENTREGA_CONFIG: Record<string, { label: string; color: string }> = {
-  despachado: { label: "Despachado", color: "bg-purple-100 text-purple-700" },
-  entregue: { label: "Entregue", color: "bg-green-100 text-green-700" },
+  despachado: { label: "Despachado", color: "bg-status-rua/10 text-status-ink-rua" },
+  entregue: { label: "Entregue", color: "bg-status-entregue/10 text-status-ink-entregue" },
 };
 
 const PROXIMOS_STATUS: Record<string, string[]> = {
@@ -111,7 +111,7 @@ async function fetchEntregasEntregador(entregadorId: string): Promise<PedidoEntr
     .from("pedidos")
     .select("*, clientes(nome, telefone, observacoes, foto_url), itens_pedido(item, quantidade), despacho_entrega(*)")
     .in("id", pedidoIds)
-    .not("status", "in", '("cancelado","retirado")')
+    .not("status", "in", '("retirado")')
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as PedidoEntrega[];
@@ -127,7 +127,7 @@ async function fetchEntregadores(): Promise<Entregador[]> {
 }
 
 function StatusBadge({ status, config }: { status: string; config: Record<string, { label: string; color: string }> }) {
-  const s = config[status] ?? { label: status, color: "bg-gray-100 text-gray-700" };
+  const s = config[status] ?? { label: status, color: "bg-muted text-foreground" };
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${s.color}`}>
       {s.label}
@@ -285,12 +285,12 @@ function CardEntregaAdmin({
 
           {/* Pagamento recebido */}
           {despacho?.pagamento_recebido?.length ? (
-            <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs space-y-0.5">
-              <p className="font-semibold text-green-800">Pagamento recebido pelo entregador:</p>
+            <div className="bg-status-entregue/10 border border-status-entregue/25 rounded-lg px-3 py-2 text-xs space-y-0.5">
+              <p className="font-semibold text-status-ink-entregue">Pagamento recebido pelo entregador:</p>
               {despacho.pagamento_recebido.map((pg, i) => (
-                <p key={i} className="text-green-700">{pg.forma}: R$ {pg.valor.toFixed(2)}</p>
+                <p key={i} className="text-status-ink-entregue">{pg.forma}: R$ {pg.valor.toFixed(2)}</p>
               ))}
-              <p className="font-semibold text-green-800 border-t border-green-200 pt-1 mt-1">
+              <p className="font-semibold text-status-ink-entregue border-t border-status-entregue/25 pt-1 mt-1">
                 Total: R$ {despacho.pagamento_recebido.reduce((s, pg) => s + pg.valor, 0).toFixed(2)}
                 {pedido.valor_total ? ` / R$ ${pedido.valor_total.toFixed(2)} esperado` : ""}
               </p>
@@ -547,14 +547,14 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         {pedido.valor_total != null && (
           <div className="text-right shrink-0">
             <p className="text-xs text-muted-foreground">A receber</p>
-            <p className="text-lg font-bold text-green-600">R$ {pedido.valor_total.toFixed(2)}</p>
+            <p className="text-lg font-bold text-money">R$ {pedido.valor_total.toFixed(2)}</p>
           </div>
         )}
       </div>
 
       {/* Observações do cliente */}
       {pedido.clientes?.observacoes && (
-        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+        <div className="flex items-start gap-2 bg-status-separacao/10 border border-status-separacao/30 rounded-lg px-3 py-2 text-xs text-status-ink-separacao font-medium">
           <span className="shrink-0 font-semibold">⚠ Obs:</span>
           <span>{pedido.clientes.observacoes}</span>
         </div>
@@ -603,13 +603,13 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
       <div className="flex gap-2">
         {mapsUrl && (
           <a href={mapsUrl} target="_blank" rel="noreferrer"
-            className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors border border-blue-200">
+            className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold bg-status-novo/10 text-status-ink-novo hover:bg-status-novo/20 transition-colors border border-status-novo/30">
             <Navigation className="w-4 h-4" /> Maps
           </a>
         )}
         {wppUrl && (
           <a href={wppUrl} target="_blank" rel="noreferrer"
-            className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100 transition-colors border border-green-200">
+            className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold bg-status-entregue/10 text-status-ink-entregue hover:bg-status-entregue/20 transition-colors border border-status-entregue/30">
             <Phone className="w-4 h-4" /> WhatsApp
           </a>
         )}
@@ -714,7 +714,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
       {/* Localização registrada */}
       {despacho?.localizacao && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary rounded-lg px-3 py-2">
-          <LocateFixed className="w-3.5 h-3.5 text-green-600 shrink-0" />
+          <LocateFixed className="w-3.5 h-3.5 text-money shrink-0" />
           <span className="flex-1">Localização registrada</span>
           {locMapsUrl && (
             <a href={locMapsUrl} target="_blank" rel="noreferrer" className="text-primary font-medium">Ver</a>
@@ -723,7 +723,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
       )}
 
       {/* Botões de ação */}
-      <div className="space-y-2">
+      {!cancelado && <div className="space-y-2">
         {!entregue && !saiu && (
           <Button className="w-full" variant="outline"
             onClick={() => sairParaEntrega.mutate()}
@@ -758,14 +758,14 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
             ? <><CheckCircle className="w-4 h-4 mr-2" />Entregue</>
             : <><CheckCircle className="w-4 h-4 mr-2" />Marcar como entregue</>}
         </Button>
-      </div>
+      </div>}
 
       {/* Pagamento recebido registrado */}
       {entregue && despacho?.pagamento_recebido?.length ? (
-        <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs space-y-0.5">
-          <p className="font-semibold text-green-800">Pagamento recebido:</p>
+        <div className="bg-status-entregue/10 border border-status-entregue/25 rounded-lg px-3 py-2 text-xs space-y-0.5">
+          <p className="font-semibold text-status-ink-entregue">Pagamento recebido:</p>
           {despacho.pagamento_recebido.map((p, i) => (
-            <p key={i} className="text-green-700">{p.forma}: R$ {p.valor.toFixed(2)}</p>
+            <p key={i} className="text-status-ink-entregue">{p.forma}: R$ {p.valor.toFixed(2)}</p>
           ))}
         </div>
       ) : null}
@@ -818,7 +818,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
                 ))}
                 <div className="flex justify-between text-sm font-semibold px-3 pt-1">
                   <span>Total recebido</span>
-                  <span className={totalPago >= (pedido.valor_total ?? 0) ? "text-green-600" : "text-amber-600"}>
+                  <span className={totalPago >= (pedido.valor_total ?? 0) ? "text-money" : "text-status-ink-separacao"}>
                     R$ {totalPago.toFixed(2)}
                   </span>
                 </div>
@@ -969,7 +969,7 @@ function EntregadoresModal({ open, onClose, entregadores }: {
                 </div>
                 <div className="flex items-center gap-2">
                   {e.user_id
-                    ? <><span className="text-xs text-green-600 font-medium">● Ativo</span>
+                    ? <><span className="text-xs text-money font-medium">● Ativo</span>
                         <Button size="sm" variant="ghost" onClick={() => abrirPin(e)} title="Redefinir PIN"><KeyRound className="w-3.5 h-3.5" /></Button></>
                     : <Button size="sm" variant="outline" onClick={() => abrirPin(e)}>Criar login</Button>}
                 </div>
@@ -1063,7 +1063,7 @@ export default function Entregas() {
   }
 
   const emAndamento = pedidos?.filter((p) => p.status !== "entregue" && p.status !== "cancelado") ?? [];
-  const finalizados = pedidos?.filter((p) => p.status === "entregue") ?? [];
+  const finalizados = pedidos?.filter((p) => p.status === "entregue" || p.status === "cancelado") ?? [];
 
   // Agrupa por data de criação
   function groupByDate(list: PedidoEntrega[]) {
@@ -1131,10 +1131,10 @@ export default function Entregas() {
             </div>
           )}
 
-          {/* Finalizadas */}
+          {/* Histórico (entregues + cancelados) */}
           {finalizados.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Entregues</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Histórico</p>
               <div className="space-y-3 opacity-75">
                 {role === "admin"
                   ? finalizados.map((p) => <CardEntregaAdmin key={p.id} pedido={p} entregadores={entregadoresAtivos} />)

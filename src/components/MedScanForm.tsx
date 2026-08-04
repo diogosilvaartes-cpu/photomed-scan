@@ -245,7 +245,7 @@ export default function MedScanForm() {
                 <button
                   type="button"
                   onClick={() => galleryRef.current?.click()}
-                  className="flex items-center gap-2 bg-white border border-silver text-slate-deep text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+                  className="flex items-center gap-2 bg-white border border-silver text-slate-deep text-sm font-medium px-4 py-2 rounded-lg hover:bg-muted/50 transition-colors"
                 >
                   <ImagePlus className="w-4 h-4" />
                   Enviar da galeria

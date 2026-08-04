@@ -1,11 +1,10 @@
-import { useEffect, useState, useRef } from "react";
-import { externalSupabase, pinToPassword } from "@/integrations/supabase/external-client";
+import { useEffect, useState } from "react";
+import { externalSupabase } from "@/integrations/supabase/external-client";
 import {
   Loader2, RefreshCw, Phone, MapPin, CreditCard, Package, ChevronRight, X, Clock,
-  Truck, Settings, KeyRound, Navigation, LocateFixed, CheckCircle, Users,
+  Truck, Navigation, LocateFixed, CheckCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -15,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { STATUS } from "@/lib/status";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -62,61 +62,61 @@ const COLUNAS = [
   {
     status: "novo",
     label: "Novos",
-    emoji: "🆕",
-    bg: "bg-blue-600",
-    bgLight: "bg-blue-50",
-    border: "border-blue-500",
-    text: "text-blue-700",
-    badge: "bg-blue-600 text-white",
-    cardAccent: "border-l-blue-500",
-    actionBg: "bg-blue-600 hover:bg-blue-700 text-white",
+    Icon: STATUS.novo.Icon,
+    bg: "bg-status-novo",
+    bgLight: "bg-status-novo/10",
+    border: "border-status-novo",
+    text: "text-status-ink-novo",
+    badge: "bg-status-novo text-white",
+    cardAccent: "border-l-status-novo",
+    actionBg: "bg-status-novo hover:bg-status-novo/90 text-white",
   },
   {
     status: "em_separacao",
     label: "Separação",
-    emoji: "📦",
-    bg: "bg-amber-500",
-    bgLight: "bg-amber-50",
-    border: "border-amber-500",
-    text: "text-amber-700",
-    badge: "bg-amber-500 text-white",
-    cardAccent: "border-l-amber-500",
-    actionBg: "bg-amber-500 hover:bg-amber-600 text-white",
+    Icon: STATUS.em_separacao.Icon,
+    bg: "bg-status-separacao",
+    bgLight: "bg-status-separacao/10",
+    border: "border-status-separacao",
+    text: "text-status-ink-separacao",
+    badge: "bg-status-separacao text-white",
+    cardAccent: "border-l-status-separacao",
+    actionBg: "bg-status-separacao hover:bg-status-separacao/90 text-white",
   },
   {
     status: "saiu_para_entrega",
     label: "Na rua",
-    emoji: "🛵",
-    bg: "bg-violet-600",
-    bgLight: "bg-violet-50",
-    border: "border-violet-500",
-    text: "text-violet-700",
-    badge: "bg-violet-600 text-white",
-    cardAccent: "border-l-violet-500",
-    actionBg: "bg-violet-600 hover:bg-violet-700 text-white",
+    Icon: STATUS.saiu_para_entrega.Icon,
+    bg: "bg-status-rua",
+    bgLight: "bg-status-rua/10",
+    border: "border-status-rua",
+    text: "text-status-ink-rua",
+    badge: "bg-status-rua text-white",
+    cardAccent: "border-l-status-rua",
+    actionBg: "bg-status-rua hover:bg-status-rua/90 text-white",
   },
   {
     status: "entregue",
     label: "Entregue",
-    emoji: "✅",
-    bg: "bg-emerald-600",
-    bgLight: "bg-emerald-50",
-    border: "border-emerald-500",
-    text: "text-emerald-700",
-    badge: "bg-emerald-600 text-white",
-    cardAccent: "border-l-emerald-500",
+    Icon: STATUS.entregue.Icon,
+    bg: "bg-status-entregue",
+    bgLight: "bg-status-entregue/10",
+    border: "border-status-entregue",
+    text: "text-status-ink-entregue",
+    badge: "bg-status-entregue text-white",
+    cardAccent: "border-l-status-entregue",
     actionBg: "",
   },
   {
     status: "cancelado",
     label: "Cancelado",
-    emoji: "❌",
-    bg: "bg-red-500",
-    bgLight: "bg-red-50",
-    border: "border-red-400",
-    text: "text-red-700",
-    badge: "bg-red-500 text-white",
-    cardAccent: "border-l-red-400",
+    Icon: STATUS.cancelado.Icon,
+    bg: "bg-status-cancelado",
+    bgLight: "bg-status-cancelado/10",
+    border: "border-status-cancelado",
+    text: "text-status-ink-cancelado",
+    badge: "bg-status-cancelado text-white",
+    cardAccent: "border-l-status-cancelado",
     actionBg: "",
   },
 ] as const;
@@ -412,13 +412,13 @@ function OrderCard({
   }
 
   return (
-    <div className={cn("rounded-2xl border-l-4 shadow-md overflow-hidden border border-white/60", col.bgLight, col.cardAccent)}>
+    <div className={cn("shrink-0 rounded-2xl border-l-4 shadow-md overflow-hidden border border-white/60", col.bgLight, col.cardAccent)}>
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-start justify-between gap-2 mb-1.5">
-          <p className="text-lg font-bold text-gray-900 leading-tight">{nome}</p>
+          <p className="text-lg font-bold text-foreground leading-tight">{nome}</p>
           {p.created_at && (
-            <div className="flex items-center gap-1 text-xs text-gray-400 shrink-0 mt-1">
+            <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0 mt-1">
               <Clock className="w-3 h-3" />
               {timeAgo(p.created_at)}
             </div>
@@ -429,7 +429,7 @@ function OrderCard({
             href={`https://wa.me/55${phone}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-600 hover:text-green-700"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80"
           >
             <Phone className="w-4 h-4" />
             {phone}
@@ -439,10 +439,10 @@ function OrderCard({
 
       {/* Itens */}
       {itens.length > 0 && (
-        <div className={cn("px-4 py-3 border-t border-b border-gray-100", col.bgLight)}>
+        <div className={cn("px-4 py-3 border-t border-b border-border", col.bgLight)}>
           <div className="flex items-start gap-2">
             <Package className={cn("w-4 h-4 mt-0.5 shrink-0", col.text)} />
-            <ul className="text-sm text-gray-800 space-y-0.5">
+            <ul className="text-sm text-foreground space-y-0.5">
               {itens.map((i, idx) => (
                 <li key={idx}>
                   <span className={cn("font-bold", col.text)}>×{i.quantidade}</span>{" "}{i.item}
@@ -453,8 +453,8 @@ function OrderCard({
         </div>
       )}
       {!itens.length && p.resumo && (
-        <div className={cn("px-4 py-3 border-t border-gray-100", col.bgLight)}>
-          <p className="text-sm text-gray-600 italic">{p.resumo}</p>
+        <div className={cn("px-4 py-3 border-t border-border", col.bgLight)}>
+          <p className="text-sm text-muted-foreground italic">{p.resumo}</p>
         </div>
       )}
 
@@ -462,36 +462,36 @@ function OrderCard({
       <div className="px-4 py-3 space-y-2">
         {p.endereco && enderecoLink && (
           <a href={enderecoLink} target="_blank" rel="noreferrer"
-            className="flex items-start gap-2 text-sm text-blue-600 hover:underline">
+            className="flex items-start gap-2 text-sm text-status-ink-novo hover:underline">
             <MapPin className="w-4 h-4 mt-0.5 shrink-0" />
             <span className="line-clamp-2">{enderecoIsCoords ? "Ver no Maps" : p.endereco}</span>
           </a>
         )}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-sm text-gray-500">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <CreditCard className="w-4 h-4" />
             <span>{p.pagamento ?? "—"}</span>
             {p.pix_link && (
               <a href={p.pix_link} target="_blank" rel="noreferrer"
-                className="ml-1 text-blue-600 text-xs hover:underline font-medium">ver PIX</a>
+                className="ml-1 text-status-ink-novo text-xs hover:underline font-medium">ver PIX</a>
             )}
           </div>
           {p.valor_total != null && (
-            <span className="text-xl font-extrabold text-gray-900">{formatCurrency(p.valor_total)}</span>
+            <span className="text-xl font-extrabold text-foreground">{formatCurrency(p.valor_total)}</span>
           )}
         </div>
 
         {entregadorNome && (
-          <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-1">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground mt-1">
             <Truck className="w-4 h-4 shrink-0" />
-            <span>Entregador: <span className="font-medium text-gray-700">{entregadorNome}</span></span>
+            <span>Entregador: <span className="font-medium text-foreground">{entregadorNome}</span></span>
           </div>
         )}
         {despacho?.pagamento_recebido?.length ? (
           <div className="mt-1 flex flex-wrap gap-1">
-            <span className="text-xs text-gray-500">Recebido:</span>
+            <span className="text-xs text-muted-foreground">Recebido:</span>
             {despacho.pagamento_recebido.map((pg, i) => (
-              <span key={i} className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+              <span key={i} className="text-xs bg-status-entregue/15 text-money px-2 py-0.5 rounded-full font-medium">
                 {pg.forma} R$ {pg.valor.toFixed(2)}
               </span>
             ))}
@@ -520,7 +520,7 @@ function OrderCard({
               disabled={updating}
               onClick={() => onDespachar(p)}
               title="Mudar entregador"
-              className="w-11 h-11 flex items-center justify-center rounded-xl bg-violet-50 text-violet-600 hover:bg-violet-100 transition-colors shrink-0"
+              className="w-11 h-11 flex items-center justify-center rounded-xl bg-status-rua/10 text-status-ink-rua hover:bg-status-rua/15 transition-colors shrink-0"
             >
               <Truck className="w-4 h-4" />
             </button>
@@ -542,7 +542,7 @@ function OrderCard({
             <button
               disabled={updating}
               onClick={() => advance("cancelado")}
-              className="w-11 h-11 flex items-center justify-center rounded-xl bg-red-50 text-red-500 hover:bg-red-100 transition-colors shrink-0"
+              className="w-11 h-11 flex items-center justify-center rounded-xl bg-status-cancelado/10 text-status-cancelado hover:bg-status-cancelado/15 transition-colors shrink-0"
             >
               <X className="w-5 h-5" />
             </button>
@@ -589,13 +589,13 @@ function NaRuaCard({
   }
 
   return (
-    <div className="rounded-2xl border border-violet-200 bg-violet-50 shadow-md overflow-hidden border-l-4 border-l-violet-500">
+    <div className="shrink-0 rounded-2xl border border-status-rua/30 bg-status-rua/10 shadow-md overflow-hidden border-l-4 border-l-violet-500">
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-start justify-between gap-2">
-          <p className="text-lg font-bold text-gray-900">{nome}</p>
+          <p className="text-lg font-bold text-foreground">{nome}</p>
           {p.created_at && (
-            <span className="text-xs text-gray-400 mt-1 shrink-0">{timeAgo(p.created_at)}</span>
+            <span className="text-xs text-muted-foreground mt-1 shrink-0">{timeAgo(p.created_at)}</span>
           )}
         </div>
         {phone && (
@@ -603,7 +603,7 @@ function NaRuaCard({
             href={`https://wa.me/55${phone}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-600 hover:text-green-700 mt-1"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 mt-1"
           >
             <Phone className="w-4 h-4" />{phone}
           </a>
@@ -613,15 +613,15 @@ function NaRuaCard({
       <div className="px-4 pb-3 space-y-2">
         {/* Entregador */}
         {entregador && (
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <Truck className="w-4 h-4 shrink-0 text-violet-500" />
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Truck className="w-4 h-4 shrink-0 text-status-rua" />
             <span>{entregador.nome}</span>
             {entregador.telefone && (
               <a
                 href={`https://wa.me/${entregador.telefone.replace(/\D/g, "")}`}
                 target="_blank"
                 rel="noreferrer"
-                className="text-green-600 hover:text-green-700"
+                className="text-primary hover:text-primary/80"
               >
                 <Phone className="w-3.5 h-3.5" />
               </a>
@@ -635,7 +635,7 @@ function NaRuaCard({
             href={enderecoLink ?? "#"}
             target="_blank"
             rel="noreferrer"
-            className="flex items-start gap-2 text-sm text-blue-600 hover:underline"
+            className="flex items-start gap-2 text-sm text-status-ink-novo hover:underline"
           >
             <MapPin className="w-4 h-4 mt-0.5 shrink-0" />
             <span className="line-clamp-2">{isCoords(p.endereco) ? "Ver no Maps" : p.endereco}</span>
@@ -648,27 +648,27 @@ function NaRuaCard({
             href={locLink}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center gap-1.5 text-xs text-violet-600 hover:underline"
+            className="flex items-center gap-1.5 text-xs text-status-ink-rua hover:underline"
           >
             <LocateFixed className="w-3.5 h-3.5" />GPS atual
           </a>
         )}
 
         {/* Saiu / Chegou */}
-        <div className="flex flex-wrap gap-3 text-xs text-gray-500">
+        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
           {despacho?.saiu_em && (
             <span className="flex items-center gap-1">
-              <Navigation className="w-3.5 h-3.5 text-violet-400" />
+              <Navigation className="w-3.5 h-3.5 text-status-rua/70" />
               Saiu às {format(new Date(despacho.saiu_em), "HH:mm", { locale: ptBR })}
             </span>
           )}
           {despacho?.chegou_em ? (
-            <span className="flex items-center gap-1 text-emerald-600 font-medium">
+            <span className="flex items-center gap-1 text-status-ink-entregue font-medium">
               <CheckCircle className="w-3.5 h-3.5" />
               Chegou às {format(new Date(despacho.chegou_em), "HH:mm", { locale: ptBR })}
             </span>
           ) : (
-            <span className="flex items-center gap-1 text-amber-500">
+            <span className="flex items-center gap-1 text-status-separacao">
               <Clock className="w-3.5 h-3.5" />A caminho...
             </span>
           )}
@@ -676,18 +676,18 @@ function NaRuaCard({
 
         {/* Valor + pagamento */}
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">{p.pagamento ?? "—"}</span>
+          <span className="text-sm text-muted-foreground">{p.pagamento ?? "—"}</span>
           {p.valor_total != null && (
-            <span className="text-xl font-extrabold text-gray-900">{formatCurrency(p.valor_total)}</span>
+            <span className="text-xl font-extrabold text-foreground">{formatCurrency(p.valor_total)}</span>
           )}
         </div>
 
         {/* Pagamento recebido */}
         {despacho?.pagamento_recebido?.length ? (
           <div className="flex flex-wrap gap-1">
-            <span className="text-xs text-gray-500">Recebido:</span>
+            <span className="text-xs text-muted-foreground">Recebido:</span>
             {despacho.pagamento_recebido.map((pg, i) => (
-              <span key={i} className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+              <span key={i} className="text-xs bg-status-entregue/15 text-money px-2 py-0.5 rounded-full font-medium">
                 {pg.forma} R$ {pg.valor.toFixed(2)}
               </span>
             ))}
@@ -700,7 +700,7 @@ function NaRuaCard({
         <button
           disabled={confirming}
           onClick={handleConfirmar}
-          className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-60"
+          className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-status-entregue hover:bg-status-entregue text-white text-sm font-bold transition-colors disabled:opacity-60"
         >
           {confirming
             ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -708,227 +708,6 @@ function NaRuaCard({
         </button>
       </div>
     </div>
-  );
-}
-
-// ─── PinInput ─────────────────────────────────────────────────────────────────
-
-function PinInput({ pin, setPin, pinRefs }: {
-  pin: string[];
-  setPin: (p: string[]) => void;
-  pinRefs: React.RefObject<HTMLInputElement>[];
-}) {
-  function handleChange(index: number, value: string) {
-    const digit = value.replace(/\D/g, "").slice(-1);
-    const next = [...pin]; next[index] = digit; setPin(next);
-    if (digit && index < 3) pinRefs[index + 1].current?.focus();
-  }
-  function handleKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Backspace" && !pin[index] && index > 0) pinRefs[index - 1].current?.focus();
-  }
-  return (
-    <div className="flex gap-3 justify-center">
-      {pin.map((digit, i) => (
-        <input key={i} ref={pinRefs[i]} type="number" inputMode="numeric" min={0} max={9}
-          value={digit} onChange={(e) => handleChange(i, e.target.value)} onKeyDown={(e) => handleKeyDown(i, e)}
-          className="w-12 h-14 text-center text-xl font-bold rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-      ))}
-    </div>
-  );
-}
-
-// ─── EntregadoresModal ────────────────────────────────────────────────────────
-
-type ModalView = "list" | "pin" | "novo";
-
-function EntregadoresModal({
-  open,
-  onClose,
-  entregadores,
-  onRefresh,
-}: {
-  open: boolean;
-  onClose: () => void;
-  entregadores: EntregadorFull[];
-  onRefresh: () => void;
-}) {
-  const { toast } = useToast();
-  const [view, setView] = useState<ModalView>("list");
-  const [ativo, setAtivo] = useState<EntregadorFull | null>(null);
-  const [pin, setPin] = useState(["", "", "", ""]);
-  const [loading, setLoading] = useState(false);
-  const [novoNome, setNovoNome] = useState("");
-  const [novoTel, setNovoTel] = useState("");
-  const [novoPin, setNovoPin] = useState(["", "", "", ""]);
-
-  const pinRefs = [
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-  ];
-  const novoPinRefs = [
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-  ];
-
-  function resetAndClose() { onClose(); setView("list"); setAtivo(null); }
-
-  function abrirPin(e: EntregadorFull) {
-    setAtivo(e); setPin(["", "", "", ""]); setView("pin");
-    setTimeout(() => pinRefs[0].current?.focus(), 100);
-  }
-
-  async function salvarLogin() {
-    if (!ativo) return;
-    const pinStr = pin.join("");
-    if (pinStr.length < 4) { toast({ title: "PIN incompleto", variant: "destructive" }); return; }
-    setLoading(true);
-    try {
-      const email = `${ativo.telefone.replace(/\D/g, "")}@farmaciavital.internal`;
-      const res = await fetch("/api/create-entregador", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password: pinToPassword(pinStr), ...(ativo.user_id ? { userId: ativo.user_id } : {}) }),
-      });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.msg ?? result.error ?? "Erro na API");
-      if (!ativo.user_id) {
-        if (!result.id) throw new Error("user_id não retornado.");
-        const { error } = await externalSupabase.from("entregadores").update({ user_id: result.id }).eq("id", ativo.id);
-        if (error) throw new Error(error.message);
-      }
-      toast({ title: ativo.user_id ? `PIN redefinido para ${ativo.nome}!` : `Login criado para ${ativo.nome}!` });
-      onRefresh();
-      setView("list"); setAtivo(null);
-    } catch (err: unknown) {
-      toast({ title: "Erro ao salvar login", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
-    } finally { setLoading(false); }
-  }
-
-  async function cadastrarEntregador() {
-    if (!novoNome.trim() || !novoTel.trim()) {
-      toast({ title: "Nome e telefone são obrigatórios", variant: "destructive" }); return;
-    }
-    setLoading(true);
-    try {
-      const tel = novoTel.replace(/\D/g, "");
-      const { data: inserted, error } = await externalSupabase
-        .from("entregadores").insert({ nome: novoNome.trim(), telefone: tel, ativo: true }).select().single();
-      if (error) throw new Error(error.message);
-
-      const pinStr = novoPin.join("");
-      if (pinStr.length === 4 && inserted) {
-        const email = `${tel}@farmaciavital.internal`;
-        const res = await fetch("/api/create-entregador", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password: pinToPassword(pinStr) }),
-        });
-        const result = await res.json();
-        if (res.ok && result.id) {
-          await externalSupabase.from("entregadores").update({ user_id: result.id }).eq("id", inserted.id);
-        }
-      }
-
-      toast({ title: `${novoNome} cadastrado!` });
-      onRefresh();
-      setNovoNome(""); setNovoTel(""); setNovoPin(["", "", "", ""]);
-      setView("list");
-    } catch (err: unknown) {
-      toast({ title: "Erro ao cadastrar", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
-    } finally { setLoading(false); }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) resetAndClose(); }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>
-            {view === "novo" ? "Novo entregador" : view === "pin" ? (ativo?.user_id ? "Redefinir PIN" : "Criar login") : "Entregadores"}
-          </DialogTitle>
-        </DialogHeader>
-
-        {view === "list" && (
-          <div className="space-y-2">
-            {entregadores.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">Nenhum entregador cadastrado.</p>
-            )}
-            {entregadores.map((e) => (
-              <div key={e.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-secondary/40">
-                <div>
-                  <p className="text-sm font-medium">{e.nome}</p>
-                  <p className="text-xs text-muted-foreground">{e.telefone}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {e.user_id
-                    ? <><span className="text-xs text-green-600 font-medium">● Ativo</span>
-                        <Button size="sm" variant="ghost" onClick={() => abrirPin(e)} title="Redefinir PIN">
-                          <KeyRound className="w-3.5 h-3.5" />
-                        </Button></>
-                    : <Button size="sm" variant="outline" onClick={() => abrirPin(e)}>Criar login</Button>}
-                </div>
-              </div>
-            ))}
-            <Button
-              className="w-full mt-2"
-              onClick={() => { setNovoNome(""); setNovoTel(""); setNovoPin(["", "", "", ""]); setView("novo"); }}
-            >
-              + Novo entregador
-            </Button>
-          </div>
-        )}
-
-        {view === "pin" && ativo && (
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm font-semibold">{ativo.nome}</p>
-              <p className="text-xs text-muted-foreground">{ativo.telefone}</p>
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium">{ativo.user_id ? "Novo PIN de 4 dígitos" : "Defina um PIN de 4 dígitos"}</p>
-              <PinInput pin={pin} setPin={setPin} pinRefs={pinRefs} />
-            </div>
-            <div className="flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={() => setView("list")}>Voltar</Button>
-              <Button className="flex-1" onClick={salvarLogin} disabled={loading}>
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Salvar"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {view === "novo" && (
-          <div className="space-y-4">
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="novo-nome">Nome</Label>
-                <Input id="novo-nome" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Nome completo" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="novo-tel">Telefone (WhatsApp)</Label>
-                <Input id="novo-tel" value={novoTel} onChange={(e) => setNovoTel(e.target.value)} placeholder="5521900000000" type="tel" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>PIN de acesso (opcional)</Label>
-                <PinInput pin={novoPin} setPin={setNovoPin} pinRefs={novoPinRefs} />
-                <p className="text-xs text-muted-foreground text-center">Pode ser definido depois</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={() => setView("list")}>Voltar</Button>
-              <Button
-                className="flex-1"
-                onClick={cadastrarEntregador}
-                disabled={loading || !novoNome.trim() || !novoTel.trim()}
-              >
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Cadastrar"}
-              </Button>
-            </div>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -944,7 +723,6 @@ export default function Pedidos() {
   const [refreshing, setRefreshing] = useState(false);
   const [filtros, setFiltros] = useState<string[]>(STATUS_ATIVOS_DEFAULT);
   const [aba, setAba] = useState<"kanban" | "na_rua">("kanban");
-  const [entregadoresOpen, setEntregadoresOpen] = useState(false);
   const [despacharPedido, setDespacharPedido] = useState<Pedido | null>(null);
 
   function toggleFiltro(status: string) {
@@ -1028,15 +806,6 @@ export default function Pedidos() {
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-2xl font-extrabold text-foreground">Pedidos</h1>
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setEntregadoresOpen(true)}
-              className="h-8"
-            >
-              <Users className="w-4 h-4 mr-1.5" />
-              <span className="hidden sm:inline">Entregadores</span>
-            </Button>
             <button
               onClick={() => load(true)}
               disabled={refreshing}
@@ -1063,7 +832,7 @@ export default function Pedidos() {
             onClick={() => setAba("na_rua")}
             className={cn(
               "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
-              aba === "na_rua" ? "bg-violet-600 text-white" : "text-muted-foreground hover:bg-secondary"
+              aba === "na_rua" ? "bg-status-rua text-white" : "text-muted-foreground hover:bg-secondary"
             )}
           >
             <Truck className="w-4 h-4" />
@@ -1071,7 +840,7 @@ export default function Pedidos() {
             {naRua.length > 0 && (
               <span className={cn(
                 "px-1.5 py-0.5 rounded-full text-xs font-bold",
-                aba === "na_rua" ? "bg-white/20 text-white" : "bg-violet-600 text-white"
+                aba === "na_rua" ? "bg-white/20 text-white" : "bg-status-rua text-white"
               )}>
                 {naRua.length}
               </span>
@@ -1095,7 +864,7 @@ export default function Pedidos() {
                     ? `${col.badge} border-transparent`
                     : "bg-background text-muted-foreground border-border"
                 )}>
-                {col.emoji} {col.label}
+                <col.Icon className="w-4 h-4 shrink-0" /> {col.label}
                 <span className={cn("ml-0.5 font-bold", filtros.includes(col.status) ? "opacity-80" : "")}>
                   {byStatus(col.status).length}
                 </span>
@@ -1111,7 +880,7 @@ export default function Pedidos() {
                 return (
                   <div key={col.status} className="flex-shrink-0 w-72 sm:w-80 flex flex-col gap-3">
                     <div className={cn("flex items-center justify-between px-4 py-2.5 rounded-xl", col.bgLight)}>
-                      <span className={cn("font-bold text-base", col.text)}>{col.emoji} {col.label}</span>
+                      <span className={cn("font-bold text-base flex items-center gap-1.5", col.text)}><col.Icon className="w-4 h-4 shrink-0" />{col.label}</span>
                       <span className={cn("text-xs font-bold px-2 py-0.5 rounded-full", col.badge)}>{items.length}</span>
                     </div>
                     <div className="flex flex-col gap-3 max-h-[calc(100vh-260px)] overflow-y-auto pr-0.5">
@@ -1162,12 +931,6 @@ export default function Pedidos() {
       )}
 
       {/* Modais */}
-      <EntregadoresModal
-        open={entregadoresOpen}
-        onClose={() => setEntregadoresOpen(false)}
-        entregadores={entregadores}
-        onRefresh={() => load(true)}
-      />
 
       {despacharPedido && (
         <DespacharModal

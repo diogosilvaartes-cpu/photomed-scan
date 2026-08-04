@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Package, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import BrandMark from "@/components/BrandMark";
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { useAuth } from "@/lib/auth";
@@ -40,10 +41,8 @@ export default function Login() {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <div className="bg-primary p-3 rounded-2xl mb-3">
-            <Package className="w-8 h-8 text-primary-foreground" />
-          </div>
-          <h1 className="text-2xl font-bold text-foreground">Farmácia Vital</h1>
+          <BrandMark className="w-16 h-16 mb-4" />
+          <h1 className="font-display text-3xl font-extrabold text-foreground">Farmácia Vital</h1>
           <p className="text-sm text-muted-foreground mt-1">Painel Operacional</p>
         </div>
 

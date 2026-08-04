@@ -55,7 +55,7 @@ function InlineEdit({
   if (editing) {
     return (
       <div className="flex items-center gap-1">
-        {prefix && <span className="text-xs text-gray-400">{prefix}</span>}
+        {prefix && <span className="text-xs text-muted-foreground">{prefix}</span>}
         <input
           ref={inputRef}
           type={type}
@@ -64,13 +64,13 @@ function InlineEdit({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
-          className="w-20 border border-blue-300 rounded px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-20 border border-status-novo/50 rounded px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           autoFocus
         />
-        <button onClick={save} disabled={saving} className="text-green-600 hover:text-green-700">
+        <button onClick={save} disabled={saving} className="text-money hover:text-status-ink-entregue">
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
         </button>
-        <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600">
+        <button onClick={() => setEditing(false)} className="text-muted-foreground hover:text-muted-foreground">
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -81,12 +81,12 @@ function InlineEdit({
     <button
       onClick={open}
       title="Clique para editar"
-      className="flex items-center gap-1 group hover:bg-blue-50 rounded px-1 -mx-1 transition-colors"
+      className="flex items-center gap-1 group hover:bg-status-novo/10 rounded px-1 -mx-1 transition-colors"
     >
-      <span className={value == null ? "text-gray-300" : "font-semibold"}>
+      <span className={value == null ? "text-muted-foreground/60" : "font-semibold"}>
         {prefix}{value != null ? (type === "number" && !prefix ? value : value.toFixed(2)) : "—"}
       </span>
-      <Pencil className="w-3 h-3 text-gray-300 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+      <Pencil className="w-3 h-3 text-muted-foreground/60 group-hover:text-status-novo/70 opacity-0 group-hover:opacity-100 transition-opacity" />
     </button>
   );
 }
@@ -135,7 +135,7 @@ function FotoCell({ item, onUpdate }: { item: Medicamento; onUpdate: (url: strin
             className="w-10 h-10 object-cover rounded-md border hover:opacity-70 transition-opacity mx-auto"
           />
           {uploading
-            ? <div className="absolute inset-0 flex items-center justify-center bg-white/70 rounded-md"><Loader2 className="w-4 h-4 animate-spin text-blue-500" /></div>
+            ? <div className="absolute inset-0 flex items-center justify-center bg-white/70 rounded-md"><Loader2 className="w-4 h-4 animate-spin text-status-novo" /></div>
             : <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"><Upload className="w-3.5 h-3.5 text-white" /></div>
           }
         </button>
@@ -144,9 +144,9 @@ function FotoCell({ item, onUpdate }: { item: Medicamento; onUpdate: (url: strin
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
           title="Adicionar foto"
-          className="w-10 h-10 flex items-center justify-center rounded-md border border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 transition-colors mx-auto"
+          className="w-10 h-10 flex items-center justify-center rounded-md border border-dashed border-border hover:border-status-novo hover:bg-status-novo/10 transition-colors mx-auto"
         >
-          {uploading ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" /> : <Upload className="w-4 h-4 text-gray-300 hover:text-blue-400" />}
+          {uploading ? <Loader2 className="w-4 h-4 animate-spin text-status-novo" /> : <Upload className="w-4 h-4 text-muted-foreground/60 hover:text-status-novo/70" />}
         </button>
       )}
       <input
@@ -218,7 +218,7 @@ export default function Estoque() {
   const hoje = new Date().toISOString().slice(0, 7);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-muted/50 p-6">
       {lightbox && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
@@ -238,8 +238,8 @@ export default function Estoque() {
 
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
-          <PackageSearch className="w-6 h-6 text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-800">Estoque de Medicamentos</h1>
+          <PackageSearch className="w-6 h-6 text-status-ink-novo" />
+          <h1 className="text-2xl font-bold text-foreground">Estoque de Medicamentos</h1>
           <Badge variant="secondary" className="ml-auto text-sm">
             {filtered.length} {filtered.length === 1 ? "item" : "itens"}
           </Badge>
@@ -254,10 +254,10 @@ export default function Estoque() {
 
         {loading ? (
           <div className="flex justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+            <Loader2 className="w-8 h-8 animate-spin text-status-novo" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-20 text-gray-400">
+          <div className="text-center py-20 text-muted-foreground">
             {search ? "Nenhum resultado para a busca." : "Nenhum medicamento cadastrado ainda."}
           </div>
         ) : (
@@ -267,15 +267,15 @@ export default function Estoque() {
               const totalQtd = rows.reduce((s, r) => s + (r.quantidade ?? 0), 0);
               return (
                 <div key={nome} className="rounded-lg border bg-white shadow-sm overflow-hidden">
-                  <div className="bg-blue-50 border-b border-blue-100 px-4 py-2 flex items-center justify-between">
-                    <span className="font-semibold text-blue-800">{nome}</span>
-                    <Badge variant="outline" className="text-blue-700 border-blue-300">
+                  <div className="bg-status-novo/10 border-b border-status-novo/25 px-4 py-2 flex items-center justify-between">
+                    <span className="font-semibold text-status-ink-novo">{nome}</span>
+                    <Badge variant="outline" className="text-status-ink-novo border-status-novo/50">
                       Total: {totalQtd} un.
                     </Badge>
                   </div>
 
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
+                    <thead className="bg-muted/50 text-muted-foreground uppercase text-xs">
                       <tr>
                         <th className="px-3 py-2 text-center">Foto</th>
                         <th className="px-3 py-2 text-left">Laboratório</th>
@@ -291,16 +291,16 @@ export default function Estoque() {
                       {rows.map((m) => {
                         const vencido = m.validade && m.validade < hoje;
                         return (
-                          <tr key={m.id} className="hover:bg-gray-50 transition-colors">
+                          <tr key={m.id} className="hover:bg-muted/50 transition-colors">
                             <td className="px-3 py-3 text-center">
                               <FotoCell
                                 item={m}
                                 onUpdate={(url) => updateImagem(m.id, url)}
                               />
                             </td>
-                            <td className="px-3 py-3 text-gray-700">{m.laboratorio ?? "—"}</td>
-                            <td className="px-3 py-3 text-gray-700">{m.dosagem ?? "—"}</td>
-                            <td className="px-3 py-3 text-gray-600">{m.forma ?? "—"}</td>
+                            <td className="px-3 py-3 text-foreground">{m.laboratorio ?? "—"}</td>
+                            <td className="px-3 py-3 text-foreground">{m.dosagem ?? "—"}</td>
+                            <td className="px-3 py-3 text-muted-foreground">{m.forma ?? "—"}</td>
                             <td className="px-3 py-3 text-center">
                               <InlineEdit
                                 value={m.quantidade}
@@ -314,10 +314,10 @@ export default function Estoque() {
                                 prefix="R$"
                               />
                             </td>
-                            <td className="px-3 py-3 text-gray-600">{m.lote ?? "—"}</td>
+                            <td className="px-3 py-3 text-muted-foreground">{m.lote ?? "—"}</td>
                             <td className="px-3 py-3">
                               {m.validade ? (
-                                <span className={vencido ? "text-red-600 font-semibold" : "text-green-700"}>
+                                <span className={vencido ? "text-status-ink-cancelado font-semibold" : "text-status-ink-entregue"}>
                                   {m.validade}{vencido && " ⚠️"}
                                 </span>
                               ) : "—"}
@@ -332,7 +332,7 @@ export default function Estoque() {
             })}
           </div>
         )}
-        <p className="text-xs text-gray-400 text-center mt-6">Clique em Qtd ou Preço para editar. Clique na foto (ou ícone) para fazer upload.</p>
+        <p className="text-xs text-muted-foreground text-center mt-6">Clique em Qtd ou Preço para editar. Clique na foto (ou ícone) para fazer upload.</p>
       </div>
     </div>
   );
