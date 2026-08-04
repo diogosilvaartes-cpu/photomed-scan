@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import {
   Loader2, RefreshCw, Phone, MapPin, CreditCard, Package, ChevronRight, X, Clock,
-  Truck, Navigation, LocateFixed, CheckCircle, Eye, FileText, History, Plus,
+  Truck, Navigation, LocateFixed, CheckCircle, Eye, FileText, History, Plus, AlarmClock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,9 @@ import { cn } from "@/lib/utils";
 import { STATUS, statusConfig, brl, moneyClass } from "@/lib/status";
 import FichaPedido from "@/components/FichaPedido";
 import NovoPedidoModal from "@/components/NovoPedidoModal";
+import AgendadosLista, {
+  type PedidoAgendado, AGENDADO_SELECT, AGENDADO_PENDENTES,
+} from "@/components/AgendadosLista";
 import {
   type Pedido, type EntregadorFull,
   PEDIDO_SELECT, formatPhone, formatCurrency, timeAgo, isCoords, mapsLink, pedidoNumero,
@@ -717,7 +720,8 @@ export default function Pedidos() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filtros, setFiltros] = useState<string[]>(STATUS_ATIVOS_DEFAULT);
-  const [aba, setAba] = useState<"kanban" | "na_rua" | "historico">("kanban");
+  const [aba, setAba] = useState<"kanban" | "na_rua" | "agendados" | "historico">("kanban");
+  const [agendados, setAgendados] = useState<PedidoAgendado[]>([]);
   const [despacharPedido, setDespacharPedido] = useState<Pedido | null>(null);
   const [novoPedido, setNovoPedido] = useState(false);
   // Ficha aberta: guardamos só o id para o card seguir vivo nos refreshes de 30s
@@ -732,15 +736,21 @@ export default function Pedidos() {
   async function load(silent = false) {
     if (!silent) setLoading(true);
     else setRefreshing(true);
-    const [{ data: pedidosData }, { data: entregadoresData }] = await Promise.all([
+    const [{ data: pedidosData }, { data: entregadoresData }, { data: agendadosData }] = await Promise.all([
       externalSupabase
         .from("pedidos")
         .select(PEDIDO_SELECT)
         .order("created_at", { ascending: false }),
       externalSupabase.from("entregadores").select("*"),
+      externalSupabase
+        .from("pedidos_agendados")
+        .select(AGENDADO_SELECT)
+        .order("created_at", { ascending: false })
+        .limit(100),
     ]);
     setPedidos((pedidosData as unknown as Pedido[]) ?? []);
     setEntregadores((entregadoresData as EntregadorFull[]) ?? []);
+    setAgendados((agendadosData as unknown as PedidoAgendado[]) ?? []);
     setLoading(false);
     setRefreshing(false);
   }
@@ -788,6 +798,8 @@ export default function Pedidos() {
 
   const byStatus = (status: string) => pedidos.filter((p) => p.status === status);
   const naRua = pedidos.filter((p) => p.status === "saiu_para_entrega");
+  // Só os vivos entram no badge: encerrado (confirmado/cancelado/expirado) é histórico.
+  const agendadosPendentes = agendados.filter((a) => AGENDADO_PENDENTES.includes(a.status)).length;
   // Cards e ficha usam a lista toda (pedido antigo pode ter entregador já desativado);
   // só o despacho oferece exclusivamente quem está ativo.
   const entregadoresAtivos = entregadores.filter((e) => e.ativo);
@@ -862,6 +874,24 @@ export default function Pedidos() {
                 aba === "na_rua" ? "bg-white/20 text-white" : "bg-status-rua text-white"
               )}>
                 {naRua.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setAba("agendados")}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
+              aba === "agendados" ? "bg-status-separacao text-white" : "text-muted-foreground hover:bg-secondary"
+            )}
+          >
+            <AlarmClock className="w-4 h-4" />
+            Agendados
+            {agendadosPendentes > 0 && (
+              <span className={cn(
+                "px-1.5 py-0.5 rounded-full text-xs font-bold",
+                aba === "agendados" ? "bg-white/20 text-white" : "bg-status-separacao text-white"
+              )}>
+                {agendadosPendentes}
               </span>
             )}
           </button>
@@ -966,6 +996,13 @@ export default function Pedidos() {
       {/* ── ABA HISTÓRICO ── */}
       {/* Veio do Dashboard, que foi removido: a lista corrida de pedidos por data,
           útil para achar um pedido antigo sem depender das colunas do Kanban. */}
+      {/* ── ABA AGENDADOS ── */}
+      {aba === "agendados" && (
+        <div className="flex-1 overflow-y-auto">
+          <AgendadosLista agendados={agendados} onAbrirPedido={(id) => { setFichaId(id); setAba("kanban"); }} />
+        </div>
+      )}
+
       {aba === "historico" && (
         <div className="flex-1 overflow-y-auto p-4">
           {pedidos.length === 0 ? (

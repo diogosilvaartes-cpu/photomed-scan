@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { Package, Users, Truck, LogOut, FlaskConical, ClipboardList, Bike } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/BrandMark";
+import EntregaToggle from "@/components/EntregaToggle";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -108,8 +109,13 @@ function SidebarContent() {
         </div>
       </div>
 
+      {/* Entrega: primeira coisa da sidebar — é o estado que o balcão mais consulta e altera */}
+      <div className="pt-4">
+        <EntregaToggle />
+      </div>
+
       {/* Navegação */}
-      <div className="flex-1 py-4 overflow-y-auto">
+      <div className="flex-1 pb-4 overflow-y-auto">
         <NavItems />
       </div>
 
@@ -129,6 +135,8 @@ function MobileNav() {
 
   return (
     <nav className="flex gap-2 px-3 pb-2.5 overflow-x-auto">
+      {/* Primeiro da fileira, antes das seções: no mobile o balcão precisa alcançar sem rolar */}
+      <EntregaToggle variant="mobile" />
       {items.map((item) => (
         <NavLink
           key={item.to}
