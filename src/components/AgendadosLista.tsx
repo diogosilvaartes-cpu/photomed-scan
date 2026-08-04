@@ -1,4 +1,9 @@
-import { AlarmClock, AlertTriangle, Ban, CheckCircle2, Clock, MessageCircle, Timer } from "lucide-react";
+import { useState } from "react";
+import { AlarmClock, AlertTriangle, Ban, CheckCircle2, Clock, Loader2, MessageCircle, Timer } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { brl, moneyClass } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
@@ -6,9 +11,12 @@ import { cn } from "@/lib/utils";
  * Pedidos agendados — os que o cliente montou com a farmácia fechada e ainda não viraram
  * pedido de verdade. Tabela `pedidos_agendados`, escrita pelos workflows WF_Agendamento_*.
  *
- * Só leitura de propósito: o ciclo é conduzido pelo WhatsApp (o cliente confirma no botão
- * que o WF_Agendamento_Liberar envia na abertura). O balcão acompanha por aqui e, quando
- * precisa intervir, fala com o cliente — daí o link de WhatsApp em cada card.
+ * O caminho normal é pelo WhatsApp: o WF_Agendamento_Liberar manda os botões ao cliente na
+ * abertura e ele confirma. O balcão acompanha por aqui e pode **puxar o pedido para frente**
+ * sem esperar o cliente, pelo botão "Confirmar agora" — o cliente é avisado depois.
+ *
+ * A conversão não é feita aqui: o botão chama `/api/agendamento-confirmar`, que repassa ao
+ * WF_Agendamento_Confirmar do n8n, onde a regra já existe inteira.
  */
 
 export type ItemAgendado = { name: string; quantity: number; price?: number };
@@ -109,10 +117,30 @@ const hora = (iso: string | null) =>
       })
     : null;
 
-function Card({ a, onAbrirPedido }: { a: PedidoAgendado; onAbrirPedido?: (id: string) => void }) {
+function Card({
+  a,
+  onAbrirPedido,
+  onConfirmar,
+}: {
+  a: PedidoAgendado;
+  onAbrirPedido?: (id: string) => void;
+  onConfirmar?: (a: PedidoAgendado) => Promise<void>;
+}) {
   const cfg = cfgDe(a.status);
   const itens = itensDe(a);
   const tel = (a.telefone || "").replace(/\D/g, "");
+  const [perguntando, setPerguntando] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+  const podeConfirmar = !!onConfirmar && AGENDADO_PENDENTES.includes(a.status);
+
+  async function confirmar() {
+    setConfirmando(true);
+    try {
+      await onConfirmar!(a);
+    } finally {
+      setConfirmando(false);
+    }
+  }
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
@@ -182,6 +210,42 @@ function Card({ a, onAbrirPedido }: { a: PedidoAgendado; onAbrirPedido?: (id: st
               Ver pedido gerado
             </button>
           )}
+
+          {podeConfirmar && (
+            <>
+              <button
+                onClick={() => setPerguntando(true)}
+                disabled={confirmando}
+                className={cn(
+                  "inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-colors",
+                  confirmando && "opacity-60 cursor-not-allowed"
+                )}
+              >
+                {confirmando ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Confirmar agora
+              </button>
+
+              <AlertDialog open={perguntando} onOpenChange={setPerguntando}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Confirmar o agendamento {a.codigo ?? ""}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {a.nome_cliente || "Cliente"}
+                      {itens.length ? ` · ${itens.length} ${itens.length === 1 ? "item" : "itens"}` : ""}
+                      {a.valor_total ? ` · ${brl(a.valor_total)}` : ""}.
+                      <br />
+                      O pedido entra na fila do balcão agora e o cliente recebe o aviso de
+                      confirmação no WhatsApp, sem precisar responder.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Voltar</AlertDialogCancel>
+                    <AlertDialogAction onClick={confirmar}>Confirmar pedido</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -191,9 +255,11 @@ function Card({ a, onAbrirPedido }: { a: PedidoAgendado; onAbrirPedido?: (id: st
 export default function AgendadosLista({
   agendados,
   onAbrirPedido,
+  onConfirmar,
 }: {
   agendados: PedidoAgendado[];
   onAbrirPedido?: (pedidoId: string) => void;
+  onConfirmar?: (a: PedidoAgendado) => Promise<void>;
 }) {
   const pendentes = agendados.filter((a) => AGENDADO_PENDENTES.includes(a.status));
   const encerrados = agendados.filter((a) => !AGENDADO_PENDENTES.includes(a.status));
@@ -220,7 +286,7 @@ export default function AgendadosLista({
           </h2>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {pendentes.map((a) => (
-              <Card key={a.id} a={a} onAbrirPedido={onAbrirPedido} />
+              <Card key={a.id} a={a} onAbrirPedido={onAbrirPedido} onConfirmar={onConfirmar} />
             ))}
           </div>
         </section>
