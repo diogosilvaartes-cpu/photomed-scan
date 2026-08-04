@@ -12,6 +12,10 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -350,6 +354,9 @@ function OrderCard({
   const enderecoIsCoords = p.endereco ? isCoords(p.endereco) : false;
 
   const [updating, setUpdating] = useState(false);
+  // Cancelar é irreversível pela tela e o botão fica colado no "avançar status":
+  // sem esta confirmação, um toque errado tirava o pedido da fila sem aviso nenhum.
+  const [confirmarCancelar, setConfirmarCancelar] = useState(false);
   const canCancel = p.status ? CANCELABLE.includes(p.status) : false;
 
   // Para em_separacao e saiu_para_entrega mostramos botões customizados
@@ -516,13 +523,41 @@ function OrderCard({
             </button>
           )}
           {canCancel && (
-            <button
-              disabled={updating}
-              onClick={() => advance("cancelado")}
-              className="w-11 h-11 flex items-center justify-center rounded-xl bg-status-cancelado/10 text-status-cancelado hover:bg-status-cancelado/15 transition-colors shrink-0"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <>
+              <button
+                disabled={updating}
+                onClick={() => setConfirmarCancelar(true)}
+                title="Cancelar pedido"
+                aria-label="Cancelar pedido"
+                className="w-11 h-11 flex items-center justify-center rounded-xl bg-status-cancelado/10 text-status-cancelado hover:bg-status-cancelado/15 transition-colors shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <AlertDialog open={confirmarCancelar} onOpenChange={setConfirmarCancelar}>
+                <AlertDialogContent onClick={pararPropagacao}>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Cancelar o pedido {pedidoNumero(p)}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {nome}
+                      {itens.length ? ` · ${itens.length} ${itens.length === 1 ? "item" : "itens"}` : ""}
+                      {p.valor_total ? ` · ${brl(p.valor_total)}` : ""}.
+                      <br />
+                      O pedido sai da fila do balcão e não dá para desfazer por aqui.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Voltar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => advance("cancelado")}
+                      className="bg-status-cancelado text-white hover:bg-status-cancelado/90"
+                    >
+                      Cancelar pedido
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
           )}
         </div>
       )}
@@ -783,6 +818,44 @@ export default function Pedidos() {
     }
   }
 
+  /**
+   * Balcão puxa um agendado para frente sem esperar a resposta do cliente.
+   *
+   * Quem converte é o WF_Agendamento_Confirmar (cria pedido + itens, baixa o agendamento,
+   * avisa o cliente e o grupo). Aqui só disparamos — reimplementar a conversão no painel
+   * criaria a segunda cópia da regra, o erro que já aconteceu duas vezes neste arquivo.
+   */
+  async function confirmarAgendado(a: PedidoAgendado) {
+    try {
+      const r = await fetch("/api/agendamento-confirmar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agendado_id: a.id,
+          acao: "OK",
+          telefone: a.telefone,
+          nome: a.nome_cliente ?? "Cliente",
+        }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({} as { error?: string }));
+        throw new Error(d.error ?? `HTTP ${r.status}`);
+      }
+      toast({
+        title: "Pedido confirmado",
+        description: "Entrou na fila do balcão e o cliente foi avisado no WhatsApp.",
+      });
+      // O webhook responde onReceived: a conversão termina logo depois da resposta.
+      setTimeout(() => load(true), 2000);
+    } catch (e) {
+      toast({
+        title: "Não deu para confirmar",
+        description: e instanceof Error ? e.message : "Falha ao falar com o n8n.",
+        variant: "destructive",
+      });
+    }
+  }
+
   async function handleStatusChange(id: string, newStatus: string) {
     // O card do Kanban também tem "Confirmar Entrega" (NEXT_NORMAL.saiu_para_entrega).
     // Sem este desvio ele fechava o pedido por fora: sem avisar o cliente e sem baixar
@@ -1022,7 +1095,11 @@ export default function Pedidos() {
       {/* ── ABA AGENDADOS ── */}
       {aba === "agendados" && (
         <div className="flex-1 overflow-y-auto">
-          <AgendadosLista agendados={agendados} onAbrirPedido={(id) => { setFichaId(id); setAba("kanban"); }} />
+          <AgendadosLista
+            agendados={agendados}
+            onAbrirPedido={(id) => { setFichaId(id); setAba("kanban"); }}
+            onConfirmar={readOnly ? undefined : confirmarAgendado}
+          />
         </div>
       )}
 
