@@ -23,7 +23,7 @@ import AgendadosLista, {
 } from "@/components/AgendadosLista";
 import {
   type Pedido, type EntregadorFull,
-  PEDIDO_SELECT, formatPhone, formatCurrency, timeAgo, isCoords, mapsLink, pedidoNumero,
+  PEDIDO_SELECT, fichaTexto, formatPhone, formatCurrency, timeAgo, isCoords, mapsLink, pedidoNumero,
 } from "@/lib/pedido";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -183,14 +183,15 @@ function DespacharModal({
           });
         }
 
-        // Notifica entregador com lista de itens
+        // Notifica o entregador com a ficha COMPLETA.
+        // Antes montava aqui uma versão curta própria, sem código do pedido, wa.me do
+        // cliente, link do Maps, obs de entrega, pessoa que recebe, nota interna nem link
+        // da ficha — enquanto o n8n (Desp_Montar_Msg) mandava tudo. O entregador recebia
+        // mensagens diferentes conforme quem despachasse.
+        // `fichaTexto()` é a fonte única (mesma do botão "Copiar ficha do entregador").
         const entregador = entregadores.find((e) => e.id === selectedId);
-        const clienteNome = pedido.clientes?.nome ?? pedido.clientes?.telefone ?? "—";
-        const itensStr = pedido.itens_pedido
-          ?.filter((i) => i.item)
-          .map((i) => `• ${i.quantidade}x ${i.item}`)
-          .join("\n") || "ver pedido";
-        const valorStr = valorTotal != null ? formatCurrency(valorTotal) : "—";
+        // valorTotal pode ter acabado de ser calculado acima e ainda não estar no objeto.
+        const pedidoFicha: Pedido = { ...pedido, valor_total: valorTotal ?? pedido.valor_total };
         // Só o entregador é avisado aqui. O cliente é avisado quando o
         // entregador de fato sai (botão no painel dele ou no WhatsApp) — mesma
         // regra que o n8n segue desde 03/08.
@@ -201,14 +202,21 @@ function DespacharModal({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 phone: entregador.telefone.replace(/\D/g, ""),
-                message: `🛵 *ENTREGA PARA VOCÊ*\n👤 ${clienteNome}\n📍 ${pedido.endereco ?? "—"}\n\n📦 *Itens:*\n${itensStr}\n\n💳 ${pedido.pagamento ?? "—"} — ${valorStr}`,
+                message: fichaTexto(pedidoFicha, entregador.nome),
               }),
             });
-            if (!r.ok) throw new Error(String(r.status));
-          } catch {
+            if (!r.ok) {
+              // 500 aqui = ZAPI_INSTANCE/TOKEN/CLIENT_TOKEN faltando na Vercel.
+              // Sem o status na tela, "não chegou" e "não configurado" são indistinguíveis.
+              const d = await r.json().catch(() => ({}));
+              throw new Error(`${r.status}${d?.error ? ` — ${d.error}` : ""}`);
+            }
+          } catch (e) {
             toast({
               title: "Entregador não foi avisado",
-              description: "O despacho foi salvo, mas o WhatsApp não saiu. Chame o entregador.",
+              description: `O despacho foi salvo, mas o WhatsApp não saiu (${
+                e instanceof Error ? e.message : "erro"
+              }). Chame o entregador.`,
               variant: "destructive",
             });
           }
