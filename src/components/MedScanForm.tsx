@@ -122,15 +122,13 @@ export default function MedScanForm() {
 
   const handleSave = async () => {
     try {
-      setStatusMsg("1 form=" + JSON.stringify(form));
       const required: (keyof MedFormData)[] = ["name", "lab", "dosage", "pharmaForm", "quantity"];
       const missing = required.filter((k) => !String(form[k] ?? "").trim());
-      setStatusMsg("2 missing=" + JSON.stringify(missing));
       if (missing.length) {
         setStatusMsg("❌ Campos vazios: " + missing.join(", "));
         return;
       }
-      setStatusMsg("⏳ Enviando para o Supabase...");
+      setStatusMsg("⏳ Salvando no estoque...");
       setSaving(true);
       const res = await fetch(`${SUPABASE_URL}/rest/v1/estoque`, {
         method: "POST",
@@ -150,14 +148,17 @@ export default function MedScanForm() {
           validade: form.expiry || null,
         }),
       });
-      const status = res.status;
-      const body = await res.text();
-      setStatusMsg(`3 HTTP ${status} | body=${body}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        // O corpo cru vai para o console; na tela fica só o que o atendente precisa saber.
+        console.error("[MedScan] Falha ao salvar no estoque:", res.status, await res.text());
+        setStatusMsg(`❌ Não foi possível salvar (erro ${res.status}). Tente de novo.`);
+        return;
+      }
       setSaved(true);
       setStatusMsg("✅ Salvo: " + form.name);
     } catch (err) {
-      setStatusMsg("💥 ERRO: " + (err instanceof Error ? err.message : String(err)));
+      console.error("[MedScan] Erro ao salvar no estoque:", err);
+      setStatusMsg("💥 Erro ao salvar. Confira a conexão e tente de novo.");
     } finally {
       setSaving(false);
     }

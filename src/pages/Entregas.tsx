@@ -3,18 +3,10 @@ import { Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Truck, User, MapPin, Phone, Package, Loader2,
-  CheckCircle, Clock, ChevronDown, Navigation, Settings, KeyRound,
+  CheckCircle, Clock, Navigation,
   LocateFixed, LogOut, Camera, MessageSquare, X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -25,33 +17,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { externalSupabase, createTempAuthClient, pinToPassword } from "@/integrations/supabase/external-client";
+import { externalSupabase } from "@/integrations/supabase/external-client";
 import { useAuth } from "@/lib/auth";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  novo: { label: "Novo", color: "bg-status-novo/10 text-status-ink-novo border-status-novo/30" },
-  confirmado: { label: "Confirmado", color: "bg-primary/10 text-primary border-primary/30" },
-  em_separacao: { label: "Em separação", color: "bg-status-separacao/10 text-status-ink-separacao border-status-separacao/30" },
-  saiu_para_entrega: { label: "Saiu p/ entrega", color: "bg-status-rua/10 text-status-ink-rua border-status-rua/30" },
-  entregue: { label: "Entregue", color: "bg-status-entregue/10 text-status-ink-entregue border-status-entregue/30" },
-  cancelado: { label: "Cancelado", color: "bg-status-cancelado/10 text-status-ink-cancelado border-status-cancelado/30" },
-};
-
-const STATUS_ENTREGA_CONFIG: Record<string, { label: string; color: string }> = {
-  despachado: { label: "Despachado", color: "bg-status-rua/10 text-status-ink-rua" },
-  entregue: { label: "Entregue", color: "bg-status-entregue/10 text-status-ink-entregue" },
-};
-
-const PROXIMOS_STATUS: Record<string, string[]> = {
-  novo: ["confirmado", "cancelado"],
-  confirmado: ["em_separacao", "cancelado"],
-  em_separacao: ["saiu_para_entrega", "pronto_para_retirada"],
-  saiu_para_entrega: ["entregue"],
-};
-
-type Entregador = { id: string; nome: string; telefone: string; ativo: boolean; user_id: string | null };
+// Os mapas de status e o tipo Entregador viviam aqui só para o card de admin, que saiu
+// deste arquivo. A fonte única de label/cor de status é `src/lib/status.ts`.
 
 type ItemPagamento = { forma: string; valor: number };
 
@@ -85,17 +57,6 @@ type PedidoEntrega = {
   despacho_entrega: DespachoEntrega[];
 };
 
-async function fetchEntregasAdmin(): Promise<PedidoEntrega[]> {
-  const { data, error } = await externalSupabase
-    .from("pedidos")
-    .select("*, clientes(nome, telefone), itens_pedido(item, quantidade), despacho_entrega(*)")
-    .eq("tipo_fulfillment", "entrega")
-    .not("status", "in", '("retirado","cancelado")')
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as PedidoEntrega[];
-}
-
 async function fetchEntregasEntregador(entregadorId: string): Promise<PedidoEntrega[]> {
   // Get despachos for this entregador
   const { data: despachos, error: de } = await externalSupabase
@@ -115,231 +76,6 @@ async function fetchEntregasEntregador(entregadorId: string): Promise<PedidoEntr
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as PedidoEntrega[];
-}
-
-async function fetchEntregadores(): Promise<Entregador[]> {
-  const { data, error } = await externalSupabase
-    .from("entregadores")
-    .select("id, nome, telefone, ativo, user_id")
-    .order("nome");
-  if (error) throw error;
-  return data ?? [];
-}
-
-function StatusBadge({ status, config }: { status: string; config: Record<string, { label: string; color: string }> }) {
-  const s = config[status] ?? { label: status, color: "bg-muted text-foreground" };
-  return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${s.color}`}>
-      {s.label}
-    </span>
-  );
-}
-
-function CardEntregaAdmin({
-  pedido,
-  entregadores,
-}: {
-  pedido: PedidoEntrega;
-  entregadores: Entregador[];
-}) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const [expanded, setExpanded] = useState(false);
-
-  const despacho = pedido.despacho_entrega[0] ?? null;
-  const entregadorAtual = despacho
-    ? entregadores.find((e) => e.id === despacho.entregador_id)
-    : null;
-
-  const atribuirEntregador = useMutation({
-    mutationFn: async (entregadorId: string) => {
-      if (despacho) {
-        const { error } = await externalSupabase
-          .from("despacho_entrega")
-          .update({ entregador_id: entregadorId })
-          .eq("id", despacho.id);
-        if (error) throw error;
-      } else {
-        const { error } = await externalSupabase.from("despacho_entrega").insert({
-          pedido_id: pedido.id,
-          entregador_id: entregadorId,
-          status_entrega: "despachado",
-        });
-        if (error) throw error;
-      }
-      // Notificar entregador designado
-      const entregador = entregadores.find((e) => e.id === entregadorId);
-      if (entregador?.telefone) {
-        const clienteNome = pedido.clientes?.nome ?? pedido.clientes?.telefone ?? "—";
-        try {
-          await fetch("/api/notify-client", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              phone: entregador.telefone.replace(/\D/g, ""),
-              message: `🛵 Nova entrega para você!\nCliente: ${clienteNome}\nEndereço: ${pedido.endereco ?? "—"}\nValor: R$ ${pedido.valor_total?.toFixed(2) ?? "—"}\nAcesse o painel para ver os detalhes.`,
-            }),
-          });
-        } catch { /* notificação silenciosa */ }
-      }
-    },
-    onSuccess: () => {
-      toast({ title: "Entregador atribuído" });
-      qc.invalidateQueries({ queryKey: ["entregas-admin"] });
-    },
-    onError: () => toast({ title: "Erro ao atribuir", variant: "destructive" }),
-  });
-
-  const atualizarStatus = useMutation({
-    mutationFn: async (novoStatus: string) => {
-      const { error } = await externalSupabase
-        .from("pedidos")
-        .update({ status: novoStatus })
-        .eq("id", pedido.id);
-      if (error) throw error;
-      if (novoStatus === "entregue" && despacho) {
-        await externalSupabase
-          .from("despacho_entrega")
-          .update({ status_entrega: "entregue", entregue_em: new Date().toISOString() })
-          .eq("id", despacho.id);
-      }
-    },
-    onSuccess: () => {
-      toast({ title: "Status atualizado" });
-      qc.invalidateQueries({ queryKey: ["entregas-admin"] });
-    },
-    onError: () => toast({ title: "Erro ao atualizar status", variant: "destructive" }),
-  });
-
-  const proximos = PROXIMOS_STATUS[pedido.status] ?? [];
-  const nomeCliente = pedido.clientes?.nome ?? pedido.clientes?.telefone ?? "—";
-  const telefone = pedido.clientes?.telefone ?? "";
-
-  return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-secondary/50 transition-colors"
-      >
-        <div className="bg-primary/10 p-1.5 rounded-lg shrink-0">
-          <Package className="w-4 h-4 text-primary" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-foreground truncate">{nomeCliente}</span>
-            <StatusBadge status={pedido.status} config={STATUS_CONFIG} />
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-            {pedido.endereco ?? "Endereço não informado"}
-          </p>
-        </div>
-        <div className="shrink-0 flex items-center gap-2">
-          {pedido.valor_total && (
-            <span className="text-sm font-semibold text-foreground hidden sm:block">
-              R$ {pedido.valor_total.toFixed(2)}
-            </span>
-          )}
-          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} />
-        </div>
-      </button>
-
-      {expanded && (
-        <div className="px-4 pb-4 space-y-4 border-t border-border pt-3">
-          {/* Itens */}
-          {pedido.itens_pedido.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Itens</p>
-              <ul className="text-sm space-y-0.5">
-                {pedido.itens_pedido.map((item, i) => (
-                  <li key={i}>×{item.quantidade} {item.item}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Info */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-            {telefone && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Phone className="w-3.5 h-3.5" />
-                <a href={`https://wa.me/${telefone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="hover:text-primary">
-                  {telefone}
-                </a>
-              </div>
-            )}
-            {pedido.endereco && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <MapPin className="w-3.5 h-3.5" />
-                <span className="truncate">{pedido.endereco}</span>
-              </div>
-            )}
-            {pedido.pagamento && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <span className="text-xs">Pagamento: {pedido.pagamento}</span>
-              </div>
-            )}
-            <div className="text-xs text-muted-foreground">
-              {format(new Date(pedido.created_at), "dd/MM/yy HH:mm", { locale: ptBR })}
-            </div>
-          </div>
-
-          {/* Pagamento recebido */}
-          {despacho?.pagamento_recebido?.length ? (
-            <div className="bg-status-entregue/10 border border-status-entregue/25 rounded-lg px-3 py-2 text-xs space-y-0.5">
-              <p className="font-semibold text-status-ink-entregue">Pagamento recebido pelo entregador:</p>
-              {despacho.pagamento_recebido.map((pg, i) => (
-                <p key={i} className="text-status-ink-entregue">{pg.forma}: R$ {pg.valor.toFixed(2)}</p>
-              ))}
-              <p className="font-semibold text-status-ink-entregue border-t border-status-entregue/25 pt-1 mt-1">
-                Total: R$ {despacho.pagamento_recebido.reduce((s, pg) => s + pg.valor, 0).toFixed(2)}
-                {pedido.valor_total ? ` / R$ ${pedido.valor_total.toFixed(2)} esperado` : ""}
-              </p>
-            </div>
-          ) : null}
-
-          {/* Entregador */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-sm text-muted-foreground shrink-0">
-              <Truck className="w-4 h-4" />
-              <span>Entregador:</span>
-            </div>
-            <Select
-              value={entregadorAtual?.id ?? ""}
-              onValueChange={(v) => atribuirEntregador.mutate(v)}
-              disabled={atribuirEntregador.isPending}
-            >
-              <SelectTrigger className="h-8 text-sm flex-1">
-                <SelectValue placeholder="Atribuir..." />
-              </SelectTrigger>
-              <SelectContent>
-                {entregadores.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>{e.nome}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Ações de status */}
-          {proximos.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {proximos.map((s) => (
-                <Button
-                  key={s}
-                  size="sm"
-                  variant={s === "cancelado" ? "destructive" : "default"}
-                  disabled={atualizarStatus.isPending}
-                  onClick={() => atualizarStatus.mutate(s)}
-                >
-                  {atualizarStatus.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}
-                  {STATUS_CONFIG[s]?.label ?? s}
-                </Button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
@@ -847,218 +583,20 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   );
 }
 
-type ModalView = "list" | "pin" | "novo";
-
-function PinInput({ pin, setPin, pinRefs }: {
-  pin: string[];
-  setPin: (p: string[]) => void;
-  pinRefs: React.RefObject<HTMLInputElement>[];
-}) {
-  function handleChange(index: number, value: string) {
-    const digit = value.replace(/\D/g, "").slice(-1);
-    const next = [...pin]; next[index] = digit; setPin(next);
-    if (digit && index < 3) pinRefs[index + 1].current?.focus();
-  }
-  function handleKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Backspace" && !pin[index] && index > 0) pinRefs[index - 1].current?.focus();
-  }
-  return (
-    <div className="flex gap-3 justify-center">
-      {pin.map((digit, i) => (
-        <input key={i} ref={pinRefs[i]} type="number" inputMode="numeric" min={0} max={9}
-          value={digit} onChange={(e) => handleChange(i, e.target.value)} onKeyDown={(e) => handleKeyDown(i, e)}
-          className="w-12 h-14 text-center text-xl font-bold rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-      ))}
-    </div>
-  );
-}
-
-function EntregadoresModal({ open, onClose, entregadores }: {
-  open: boolean; onClose: () => void; entregadores: Entregador[];
-}) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const [view, setView] = useState<ModalView>("list");
-  const [ativo, setAtivo] = useState<Entregador | null>(null);
-  const [pin, setPin] = useState(["", "", "", ""]);
-  const [loading, setLoading] = useState(false);
-  // Novo entregador
-  const [novoNome, setNovoNome] = useState("");
-  const [novoTel, setNovoTel] = useState("");
-  const [novoPin, setNovoPin] = useState(["", "", "", ""]);
-
-  const pinRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
-  const novoPinRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
-
-  function resetAndClose() { onClose(); setView("list"); setAtivo(null); }
-
-  function abrirPin(e: Entregador) {
-    setAtivo(e); setPin(["", "", "", ""]); setView("pin");
-    setTimeout(() => pinRefs[0].current?.focus(), 100);
-  }
-
-  async function salvarLogin() {
-    if (!ativo) return;
-    const pinStr = pin.join("");
-    if (pinStr.length < 4) { toast({ title: "PIN incompleto", variant: "destructive" }); return; }
-    setLoading(true);
-    try {
-      const email = `${ativo.telefone.replace(/\D/g, "")}@farmaciavital.internal`;
-      const res = await fetch("/api/create-entregador", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password: pinToPassword(pinStr), ...(ativo.user_id ? { userId: ativo.user_id } : {}) }),
-      });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.msg ?? result.error ?? "Erro na API");
-      if (!ativo.user_id) {
-        if (!result.id) throw new Error("user_id não retornado.");
-        const { error } = await externalSupabase.from("entregadores").update({ user_id: result.id }).eq("id", ativo.id);
-        if (error) throw new Error(error.message);
-      }
-      toast({ title: ativo.user_id ? `PIN redefinido para ${ativo.nome}!` : `Login criado para ${ativo.nome}!` });
-      qc.invalidateQueries({ queryKey: ["entregadores"] });
-      setView("list"); setAtivo(null);
-    } catch (err: unknown) {
-      toast({ title: "Erro ao salvar login", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
-    } finally { setLoading(false); }
-  }
-
-  async function cadastrarEntregador() {
-    if (!novoNome.trim() || !novoTel.trim()) {
-      toast({ title: "Nome e telefone são obrigatórios", variant: "destructive" }); return;
-    }
-    setLoading(true);
-    try {
-      const tel = novoTel.replace(/\D/g, "");
-      const { data: inserted, error } = await externalSupabase
-        .from("entregadores").insert({ nome: novoNome.trim(), telefone: tel, ativo: true }).select().single();
-      if (error) throw new Error(error.message);
-
-      const pinStr = novoPin.join("");
-      if (pinStr.length === 4 && inserted) {
-        const email = `${tel}@farmaciavital.internal`;
-        const res = await fetch("/api/create-entregador", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password: pinToPassword(pinStr) }),
-        });
-        const result = await res.json();
-        if (res.ok && result.id) {
-          await externalSupabase.from("entregadores").update({ user_id: result.id }).eq("id", inserted.id);
-        }
-      }
-
-      toast({ title: `${novoNome} cadastrado!` });
-      qc.invalidateQueries({ queryKey: ["entregadores"] });
-      setNovoNome(""); setNovoTel(""); setNovoPin(["", "", "", ""]);
-      setView("list");
-    } catch (err: unknown) {
-      toast({ title: "Erro ao cadastrar", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
-    } finally { setLoading(false); }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) resetAndClose(); }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>
-            {view === "novo" ? "Novo entregador" : view === "pin" ? (ativo?.user_id ? "Redefinir PIN" : "Criar login") : "Entregadores"}
-          </DialogTitle>
-        </DialogHeader>
-
-        {view === "list" && (
-          <div className="space-y-2">
-            {entregadores.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">Nenhum entregador cadastrado.</p>
-            )}
-            {entregadores.map((e) => (
-              <div key={e.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-secondary/40">
-                <div>
-                  <p className="text-sm font-medium">{e.nome}</p>
-                  <p className="text-xs text-muted-foreground">{e.telefone}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {e.user_id
-                    ? <><span className="text-xs text-money font-medium">● Ativo</span>
-                        <Button size="sm" variant="ghost" onClick={() => abrirPin(e)} title="Redefinir PIN"><KeyRound className="w-3.5 h-3.5" /></Button></>
-                    : <Button size="sm" variant="outline" onClick={() => abrirPin(e)}>Criar login</Button>}
-                </div>
-              </div>
-            ))}
-            <Button className="w-full mt-2" onClick={() => { setNovoNome(""); setNovoTel(""); setNovoPin(["","","",""]); setView("novo"); }}>
-              + Novo entregador
-            </Button>
-          </div>
-        )}
-
-        {view === "pin" && ativo && (
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm font-semibold">{ativo.nome}</p>
-              <p className="text-xs text-muted-foreground">{ativo.telefone}</p>
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium">{ativo.user_id ? "Novo PIN de 4 dígitos" : "Defina um PIN de 4 dígitos"}</p>
-              <PinInput pin={pin} setPin={setPin} pinRefs={pinRefs} />
-            </div>
-            <div className="flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={() => setView("list")}>Voltar</Button>
-              <Button className="flex-1" onClick={salvarLogin} disabled={loading}>
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Salvar"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {view === "novo" && (
-          <div className="space-y-4">
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="novo-nome">Nome</Label>
-                <Input id="novo-nome" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Nome completo" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="novo-tel">Telefone (WhatsApp)</Label>
-                <Input id="novo-tel" value={novoTel} onChange={(e) => setNovoTel(e.target.value)} placeholder="5521900000000" type="tel" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>PIN de acesso (opcional)</Label>
-                <PinInput pin={novoPin} setPin={setNovoPin} pinRefs={novoPinRefs} />
-                <p className="text-xs text-muted-foreground text-center">Pode ser definido depois</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={() => setView("list")}>Voltar</Button>
-              <Button className="flex-1" onClick={cadastrarEntregador} disabled={loading || !novoNome.trim() || !novoTel.trim()}>
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Cadastrar"}
-              </Button>
-            </div>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
+/**
+ * Tela de trabalho do ENTREGADOR. O admin nunca chega aqui — é redirecionado para /pedidos,
+ * que tem a fila inteira. Por isso não existe mais nenhuma variante "admin" neste arquivo:
+ * a que existia era código inalcançável e só produzia erro de tipo.
+ */
 export default function Entregas() {
   const { role, entregadorId, entregadorNome } = useAuth();
-  const [entregadoresOpen, setEntregadoresOpen] = useState(false);
 
   const { data: pedidos, isLoading } = useQuery({
-    queryKey: role === "admin" ? ["entregas-admin"] : ["entregas-entregador", entregadorId],
-    queryFn: role === "admin"
-      ? fetchEntregasAdmin
-      : () => fetchEntregasEntregador(entregadorId!),
-    enabled: role !== "admin" && (!!entregadorId),
+    queryKey: ["entregas-entregador", entregadorId],
+    queryFn: () => fetchEntregasEntregador(entregadorId!),
+    enabled: role !== "admin" && !!entregadorId,
     refetchInterval: 30_000,
   });
-
-  const { data: entregadores } = useQuery({
-    queryKey: ["entregadores"],
-    queryFn: fetchEntregadores,
-    enabled: role === "admin",
-  });
-
-  const entregadoresAtivos = (entregadores ?? []).filter((e) => e.ativo);
 
   // Admin vai para Pedidos (após todos os hooks)
   if (role === "admin") return <Navigate to="/pedidos" replace />;
@@ -1091,31 +629,13 @@ export default function Entregas() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Entregas</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {role === "entregador"
-              ? `Olá, ${entregadorNome} — ${emAndamento.length} entrega(s) pendente(s)`
-              : `${emAndamento.length} entrega(s) em andamento`}
+            {`Olá, ${entregadorNome} — ${emAndamento.length} entrega(s) pendente(s)`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {role === "admin" && (
-            <Button size="sm" variant="outline" onClick={() => setEntregadoresOpen(true)}>
-              <Settings className="w-4 h-4 mr-1.5" />
-              Entregadores
-            </Button>
-          )}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="w-3.5 h-3.5" /><span>30s</span>
-          </div>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Clock className="w-3.5 h-3.5" /><span>30s</span>
         </div>
       </div>
-
-      {role === "admin" && entregadores && (
-        <EntregadoresModal
-          open={entregadoresOpen}
-          onClose={() => setEntregadoresOpen(false)}
-          entregadores={entregadores}
-        />
-      )}
 
       {pedidos?.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">
@@ -1131,9 +651,7 @@ export default function Entregas() {
                 <div key={date} className="mb-5">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 capitalize">{date}</p>
                   <div className="space-y-3">
-                    {role === "admin"
-                      ? items.map((p) => <CardEntregaAdmin key={p.id} pedido={p} entregadores={entregadoresAtivos} />)
-                      : items.map((p) => <CardEntregaEntregador key={p.id} pedido={p} />)}
+                    {items.map((p) => <CardEntregaEntregador key={p.id} pedido={p} />)}
                   </div>
                 </div>
               ))}
@@ -1145,9 +663,7 @@ export default function Entregas() {
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Histórico</p>
               <div className="space-y-3 opacity-75">
-                {role === "admin"
-                  ? finalizados.map((p) => <CardEntregaAdmin key={p.id} pedido={p} entregadores={entregadoresAtivos} />)
-                  : finalizados.map((p) => <CardEntregaEntregador key={p.id} pedido={p} />)}
+                {finalizados.map((p) => <CardEntregaEntregador key={p.id} pedido={p} />)}
               </div>
             </div>
           )}

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, PackageSearch, ImageOff, X, Upload, Check, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { brl } from "@/lib/status";
 
 interface Medicamento {
   id: string;
@@ -84,7 +85,8 @@ function InlineEdit({
       className="flex items-center gap-1 group hover:bg-status-novo/10 rounded px-1 -mx-1 transition-colors"
     >
       <span className={value == null ? "text-muted-foreground/60" : "font-semibold"}>
-        {prefix}{value != null ? (type === "number" && !prefix ? value : value.toFixed(2)) : "—"}
+        {/* Dinheiro sempre por `brl()` — `toFixed(2)` cru saía "R$7.50", com ponto. */}
+        {value == null ? "—" : prefix === "R$" ? brl(value) : `${prefix ?? ""}${value}`}
       </span>
       <Pencil className="w-3 h-3 text-muted-foreground/60 group-hover:text-status-novo/70 opacity-0 group-hover:opacity-100 transition-opacity" />
     </button>
