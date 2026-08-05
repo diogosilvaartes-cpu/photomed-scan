@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Package, Users, Truck, LogOut, Search, ClipboardList, Bike, UsersRound } from "lucide-react";
+import { Package, Users, Truck, LogOut, Search, ClipboardList, UsersRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/BrandMark";
 import EntregaToggle from "@/components/EntregaToggle";
@@ -23,7 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/pedidos", icon: <ClipboardList className="w-5 h-5" />, label: "Pedidos" },
   { to: "/estoque", icon: <Package className="w-5 h-5" />, label: "Estoque", adminOnly: true },
   { to: "/clientes", icon: <Users className="w-5 h-5" />, label: "Clientes" },
-  { to: "/entregadores", icon: <Bike className="w-5 h-5" />, label: "Entregadores", adminOnly: true },
+  // Equipe engloba os entregadores: cadastro, Ao vivo e Histórico moram lá dentro.
   { to: "/equipe", icon: <UsersRound className="w-5 h-5" />, label: "Equipe", adminOnly: true },
   // Lupa, não frasco de laboratório: o SCAN é "procurar o que é este remédio",
   // e a lupa é o que o balcão reconhece de imediato na fileira de ícones.

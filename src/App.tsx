@@ -12,7 +12,6 @@ import Pedidos from "./pages/Pedidos.tsx";
 import Login from "./pages/Login.tsx";
 import Clientes from "./pages/Clientes.tsx";
 import Entregas from "./pages/Entregas.tsx";
-import Entregadores from "./pages/Entregadores.tsx";
 import Equipe from "./pages/Equipe.tsx";
 import PedidoLink from "./pages/PedidoLink.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -67,8 +66,9 @@ function AppRoutes() {
           A rota antiga continua respondendo para não quebrar link salvo. */}
       <Route path="/conversas" element={<Navigate to="/pedidos?aba=conversas" replace />} />
       <Route path="/entregas" element={<ProtectedRoute><Entregas /></ProtectedRoute>} />
-      <Route path="/entregadores" element={<ProtectedRoute adminOnly><Entregadores /></ProtectedRoute>} />
-      {/* Cadastro e login de quem trabalha aqui — entregadores e balcão */}
+      {/* Ao vivo e Histórico viraram sub-abas de /equipe, junto do cadastro. */}
+      <Route path="/entregadores" element={<Navigate to="/equipe" replace />} />
+      {/* Tudo de quem trabalha aqui: cadastro, login e monitor das entregas */}
       <Route path="/equipe" element={<ProtectedRoute adminOnly><Equipe /></ProtectedRoute>} />
       {/* Link do WhatsApp: o entregador também abre, a ficha se vira sozinha em leitura */}
       <Route path="/pedido/:codigo" element={<ProtectedRoute><PedidoLink /></ProtectedRoute>} />

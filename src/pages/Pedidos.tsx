@@ -1230,7 +1230,7 @@ export default function Pedidos() {
         </div>
 
         {/* Abas */}
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap">
           <button
             onClick={() => setAba("kanban")}
             className={cn(
@@ -1240,6 +1240,35 @@ export default function Pedidos() {
           >
             Kanban
           </button>
+
+          {/* Conversas vem logo depois do Kanban e com peso visual próprio: era
+              item do menu lateral e, virando só mais uma aba cinza no meio da
+              fileira, ninguém olhava — é aqui que se vê o cliente esperando
+              resposta do balcão. Com gente na espera, fica âmbar e pulsa. */}
+          {!readOnly && (
+            <button
+              onClick={() => setAba("conversas")}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border",
+                aba === "conversas"
+                  ? "bg-status-rua text-white border-transparent"
+                  : conversasComBalcao > 0
+                    ? "bg-status-rua/10 text-status-ink-rua border-status-rua/40"
+                    : "bg-card text-foreground border-border hover:bg-secondary",
+              )}
+            >
+              <MessagesSquare className="w-4 h-4" />
+              Conversas
+              {conversasComBalcao > 0 && (
+                <span className={cn(
+                  "px-1.5 py-0.5 rounded-full text-xs font-bold",
+                  aba === "conversas" ? "bg-white/20 text-white" : "bg-status-rua text-white animate-pulse",
+                )}>
+                  {conversasComBalcao}
+                </span>
+              )}
+            </button>
+          )}
           <button
             onClick={() => setAba("na_rua")}
             className={cn(
@@ -1276,28 +1305,6 @@ export default function Pedidos() {
               </span>
             )}
           </button>
-          {/* Conversas era item do menu lateral; virou aba porque atender e
-              despachar são o mesmo movimento do balcão. Entregador não vê. */}
-          {!readOnly && (
-            <button
-              onClick={() => setAba("conversas")}
-              className={cn(
-                "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
-                aba === "conversas" ? "bg-status-rua text-white" : "text-muted-foreground hover:bg-secondary"
-              )}
-            >
-              <MessagesSquare className="w-4 h-4" />
-              Conversas
-              {conversasComBalcao > 0 && (
-                <span className={cn(
-                  "px-1.5 py-0.5 rounded-full text-xs font-bold",
-                  aba === "conversas" ? "bg-white/20 text-white" : "bg-status-rua text-white"
-                )}>
-                  {conversasComBalcao}
-                </span>
-              )}
-            </button>
-          )}
           <button
             onClick={() => setAba("historico")}
             className={cn(

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, PackageSearch, ImageOff, X, Upload, Check, Pencil } from "lucide-react";
+import { Loader2, PackageSearch, X, Upload, Check, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { brl } from "@/lib/status";
+import { AcoesEstoque } from "@/components/EstoqueModais";
 
 interface Medicamento {
   id: string;
@@ -169,18 +170,17 @@ export default function Estoque() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const { toast } = useToast();
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const { data } = await externalSupabase
-        .from("estoque")
-        .select("*")
-        .order("nome", { ascending: true });
-      setItems(data ?? []);
-      setLoading(false);
-    }
-    load();
+  const carregar = useCallback(async (silencioso = false) => {
+    if (!silencioso) setLoading(true);
+    const { data } = await externalSupabase
+      .from("estoque")
+      .select("*")
+      .order("nome", { ascending: true });
+    setItems(data ?? []);
+    setLoading(false);
   }, []);
+
+  useEffect(() => { carregar(); }, [carregar]);
 
   async function updateField(id: string, field: "quantidade" | "preco", value: number) {
     const { error } = await externalSupabase
@@ -218,6 +218,7 @@ export default function Estoque() {
 
   const groupNames = Object.keys(grouped).sort((a, b) => a.localeCompare(b, "pt-BR"));
   const hoje = new Date().toISOString().slice(0, 7);
+  const semPreco = items.filter((m) => !m.preco).length;
 
   return (
     <div className="min-h-screen bg-muted/50 p-6">
@@ -239,12 +240,18 @@ export default function Estoque() {
       )}
 
       <div className="max-w-5xl mx-auto">
-        <div className="flex items-center gap-3 mb-6">
+        <div className="flex items-center gap-3 mb-6 flex-wrap">
           <PackageSearch className="w-6 h-6 text-status-ink-novo" />
           <h1 className="text-2xl font-bold text-foreground">Estoque de Medicamentos</h1>
-          <Badge variant="secondary" className="ml-auto text-sm">
+          <Badge variant="secondary" className="text-sm">
             {filtered.length} {filtered.length === 1 ? "item" : "itens"}
           </Badge>
+          <div className="ml-auto">
+            <AcoesEstoque
+              atuais={items.map((m) => ({ id: m.id, nome: m.nome, dosagem: m.dosagem }))}
+              onPronto={() => carregar(true)}
+            />
+          </div>
         </div>
 
         <Input
@@ -253,6 +260,17 @@ export default function Estoque() {
           onChange={(e) => setSearch(e.target.value)}
           className="mb-6 bg-white"
         />
+
+        {/* Item sem preço não existe para a Maria: o Montar_Prompt do Ana_Agente
+            filtra `preco > 0`. Sem este aviso, o produto aparece aqui e some no
+            WhatsApp — já aconteceu de zerar um pedido agendado. */}
+        {!loading && semPreco > 0 && (
+          <p className="mb-4 text-sm text-status-ink-separacao bg-status-separacao/10 border border-status-separacao/25 rounded-xl px-3 py-2">
+            <b>{semPreco}</b> {semPreco === 1 ? "produto está" : "produtos estão"} sem preço e
+            {semPreco === 1 ? " não é oferecido" : " não são oferecidos"} pela Maria no WhatsApp.
+            Clique no preço para definir.
+          </p>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-20">

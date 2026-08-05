@@ -21,7 +21,7 @@ import { ptBR } from "date-fns/locale";
 
 type ItemPagamento = { forma: string; valor: number };
 
-interface EntregadorRow {
+export interface EntregadorRow {
   id: string;
   nome: string;
   telefone: string;
@@ -30,7 +30,7 @@ interface EntregadorRow {
   created_at: string;
 }
 
-interface DespachoFull {
+export interface DespachoFull {
   id: string;
   pedido_id: string;
   entregador_id: string | null;
@@ -116,7 +116,7 @@ function totalRecebido(pg: ItemPagamento[] | null) {
 }
 
 /** Um despacho está "na rua" enquanto não foi entregue nem cancelado. */
-function estaAtivo(d: DespachoFull) {
+export function estaAtivo(d: DespachoFull) {
   const st = d.pedidos?.status;
   if (st === "cancelado" || st === "entregue" || st === "retirado") return false;
   return !d.entregue_em && d.status_entrega !== "entregue";
@@ -146,7 +146,7 @@ const ETAPA_LABEL: Record<string, string> = {
 
 // ─── Busca de dados ───────────────────────────────────────────────────────────
 
-async function fetchDespachos(): Promise<DespachoFull[]> {
+export async function fetchDespachos(): Promise<DespachoFull[]> {
   const { data, error } = await externalSupabase
     .from("despacho_entrega")
     .select(`
@@ -162,7 +162,7 @@ async function fetchDespachos(): Promise<DespachoFull[]> {
   return (data ?? []) as unknown as DespachoFull[];
 }
 
-async function fetchEntregadores(): Promise<EntregadorRow[]> {
+export async function fetchEntregadores(): Promise<EntregadorRow[]> {
   const { data, error } = await externalSupabase
     .from("entregadores")
     .select("id, nome, telefone, ativo, user_id, created_at")
@@ -458,7 +458,7 @@ function Kpi({ icon, label, valor, destaque }: {
   );
 }
 
-function AbaAoVivo({ despachos }: { despachos: DespachoFull[] }) {
+export function AbaAoVivo({ despachos }: { despachos: DespachoFull[] }) {
   const ativos = despachos.filter(estaAtivo);
   const naRua = ativos.filter((d) => d.saiu_em);
   const aguardando = ativos.filter((d) => !d.saiu_em);
@@ -519,7 +519,7 @@ const PERIODOS = [
   { key: "tudo", label: "Tudo", dias: null },
 ] as const;
 
-function AbaHistorico({ despachos, entregadores }: {
+export function AbaHistorico({ despachos, entregadores }: {
   despachos: DespachoFull[];
   entregadores: EntregadorRow[];
 }) {
@@ -709,129 +709,9 @@ function AbaHistorico({ despachos, entregadores }: {
   );
 }
 
-// ─── Página ───────────────────────────────────────────────────────────────────
-
-/**
- * Esta página é só MONITORAMENTO. O cadastro (e o login) de quem trabalha aqui
- * mudou de lugar em 05/08: virou a seção /equipe, com entregadores e balcão
- * dentro dela — aqui não havia onde criar acesso para quem fica no balcão.
- */
-type Aba = "ao_vivo" | "historico";
-
-const ABAS: { key: Aba; label: string; icon: React.ReactNode }[] = [
-  { key: "ao_vivo", label: "Ao vivo", icon: <Radio className="w-4 h-4" /> },
-  { key: "historico", label: "Histórico", icon: <History className="w-4 h-4" /> },
-];
-
-export default function Entregadores() {
-  const qc = useQueryClient();
-  const [aba, setAba] = useState<Aba>("ao_vivo");
-  const [aoVivo, setAoVivo] = useState(false);
-  // Força re-render periódico para os contadores de "há X min" ficarem corretos
-  const [, setTick] = useState(0);
-
-  const { data: despachos, isLoading: loadingD } = useQuery({
-    queryKey: ["monitor-despachos"],
-    queryFn: fetchDespachos,
-    refetchInterval: 30_000, // rede de segurança caso o websocket caia
-  });
-
-  const { data: entregadores, isLoading: loadingE } = useQuery({
-    queryKey: ["monitor-entregadores"],
-    queryFn: fetchEntregadores,
-  });
-
-  // Realtime: qualquer mudança em despacho_entrega/pedidos recarrega o monitor
-  useEffect(() => {
-    const canal = externalSupabase
-      .channel("monitor-entregas")
-      .on("postgres_changes", { event: "*", schema: "public", table: "despacho_entrega" }, () => {
-        qc.invalidateQueries({ queryKey: ["monitor-despachos"] });
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "pedidos" }, () => {
-        qc.invalidateQueries({ queryKey: ["monitor-despachos"] });
-      })
-      .subscribe((status) => setAoVivo(status === "SUBSCRIBED"));
-
-    return () => { externalSupabase.removeChannel(canal); };
-  }, [qc]);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 30_000);
-    return () => clearInterval(id);
-  }, []);
-
-  const lista = despachos ?? [];
-  const equipe = entregadores ?? [];
-  const naRua = lista.filter(estaAtivo).length;
-
-  if (loadingD || loadingE) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-4 sm:px-6 pt-5 pb-3 border-b border-border bg-background">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-extrabold text-foreground">Entregadores</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {equipe.filter((e) => e.ativo).length} ativo(s) · {naRua} entrega(s) em andamento
-            </p>
-          </div>
-          <div
-            className={cn(
-              "flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border shrink-0",
-              aoVivo
-                ? "bg-green-50 text-green-700 border-green-200"
-                : "bg-secondary text-muted-foreground border-border"
-            )}
-            title={aoVivo ? "Conectado ao Supabase Realtime" : "Sem websocket — atualizando a cada 30s"}
-          >
-            <span className={cn("w-2 h-2 rounded-full", aoVivo ? "bg-green-500 animate-pulse" : "bg-muted-foreground/50")} />
-            {aoVivo ? "Ao vivo" : "30s"}
-          </div>
-        </div>
-
-        <div className="flex gap-1">
-          {ABAS.map((a) => (
-            <button
-              key={a.key}
-              onClick={() => setAba(a.key)}
-              className={cn(
-                "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
-                aba === a.key
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {a.icon}
-              <span>{a.label}</span>
-              {a.key === "ao_vivo" && naRua > 0 && (
-                <span className={cn(
-                  "ml-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full",
-                  aba === a.key ? "bg-primary-foreground/20" : "bg-violet-600 text-white"
-                )}>
-                  {naRua}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Conteúdo */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-        <div className="max-w-4xl mx-auto">
-          {aba === "ao_vivo" && <AbaAoVivo despachos={lista} />}
-          {aba === "historico" && <AbaHistorico despachos={lista} entregadores={equipe} />}
-        </div>
-      </div>
-    </div>
-  );
-}
+// ─── Sem página própria ──────────────────────────────────────────────────────
+//
+// Este arquivo virou o MÓDULO do monitor de entregas: exporta AbaAoVivo,
+// AbaHistorico e os fetchers. Quem monta a tela é /equipe, na aba Entregadores,
+// junto do cadastro — foi o pedido do Diogo em 05/08: tudo de entregador num
+// lugar só. A rota /entregadores continua existindo e redireciona para lá.
