@@ -11,6 +11,7 @@ import Estoque from "./pages/Estoque.tsx";
 import Pedidos from "./pages/Pedidos.tsx";
 import Login from "./pages/Login.tsx";
 import Clientes from "./pages/Clientes.tsx";
+import Conversas from "./pages/Conversas.tsx";
 import Entregas from "./pages/Entregas.tsx";
 import Entregadores from "./pages/Entregadores.tsx";
 import PedidoLink from "./pages/PedidoLink.tsx";
@@ -62,6 +63,8 @@ function AppRoutes() {
       {/* Entregador também acessa, em modo leitura (a própria página esconde as ações) */}
       <Route path="/pedidos" element={<ProtectedRoute><Pedidos /></ProtectedRoute>} />
       <Route path="/clientes" element={<ProtectedRoute><Clientes /></ProtectedRoute>} />
+      {/* Quem atende cada conversa (Ana ou balcão) e o botão de devolver — tela do balcão */}
+      <Route path="/conversas" element={<ProtectedRoute adminOnly><Conversas /></ProtectedRoute>} />
       <Route path="/entregas" element={<ProtectedRoute><Entregas /></ProtectedRoute>} />
       <Route path="/entregadores" element={<ProtectedRoute adminOnly><Entregadores /></ProtectedRoute>} />
       {/* Link do WhatsApp: o entregador também abre, a ficha se vira sozinha em leitura */}
