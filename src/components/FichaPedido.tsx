@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { externalSupabase } from "@/integrations/supabase/external-client";
 import {
   Phone, MapPin, CreditCard, Package, Truck, Clock, CheckCircle, Navigation,
-  LocateFixed, Copy, Check, StickyNote, User, Hash, Camera, Link2, ChevronRight,
+  LocateFixed, Copy, Check, StickyNote, User, Hash, Camera, Link2, ChevronRight, Compass,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -76,6 +77,32 @@ export default function FichaPedido({
 }) {
   const [copiado, setCopiado] = useState(false);
   const navigate = useNavigate();
+
+  /**
+   * Referência e fotos do LOCAL — as notas que o entregador deixou e que valem
+   * para toda entrega futura naquele endereço (`enderecos.referencia` / `.fotos`).
+   *
+   * Vem por busca separada porque exige join com `enderecos`, que o
+   * `PEDIDO_SELECT` não faz: `pedidos.endereco` guarda só o texto. Era por isso
+   * que a referência **só existia no WhatsApp** (o `Desp_Montar_Msg` faz o join)
+   * e nunca aparecia na ficha do painel.
+   */
+  const [local, setLocal] = useState<{ referencia: string | null; fotos: string[] | null } | null>(null);
+
+  useEffect(() => {
+    if (!open || !pedido.cliente_id || !pedido.endereco) { setLocal(null); return; }
+    let vivo = true;
+    (async () => {
+      const { data } = await externalSupabase
+        .from("enderecos")
+        .select("referencia, fotos")
+        .eq("cliente_id", pedido.cliente_id)
+        .eq("label_exibicao", pedido.endereco)
+        .limit(1);
+      if (vivo) setLocal(data?.[0] ?? null);
+    })();
+    return () => { vivo = false; };
+  }, [open, pedido.cliente_id, pedido.endereco]);
 
   const cfg = statusConfig(pedido.status);
   const itens = itensValidos(pedido);
@@ -191,6 +218,23 @@ export default function FichaPedido({
             ) : (
               <p className="text-sm text-muted-foreground mt-2">Sem telefone</p>
             )}
+
+            {/* Nota que o entregador deixou sobre o cliente. Já ia no bilhete do
+                WhatsApp desde 04/08, mas não aparecia em lugar nenhum do painel —
+                o balcão não tinha como saber o que a rua já sabia. */}
+            {pedido.clientes?.anotacoes_entregador && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg bg-status-separacao/10 border border-status-separacao/25 px-3 py-2">
+                <StickyNote className="w-4 h-4 shrink-0 mt-0.5 text-status-ink-separacao" />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-status-ink-separacao">
+                    Nota do entregador
+                  </p>
+                  <p className="text-sm text-foreground whitespace-pre-line">
+                    {pedido.clientes.anotacoes_entregador}
+                  </p>
+                </div>
+              </div>
+            )}
           </Secao>
 
           {/* Itens */}
@@ -263,6 +307,39 @@ export default function FichaPedido({
                 <StickyNote className="w-4 h-4 shrink-0 mt-0.5 text-muted-foreground" />
                 {pedido.obs_entrega}
               </p>
+            )}
+
+            {/* Referência do local, deixada pelo entregador em `enderecos`. */}
+            {local?.referencia && (
+              <div className="mt-2 flex items-start gap-2 rounded-lg bg-secondary px-3 py-2">
+                <Compass className="w-4 h-4 shrink-0 mt-0.5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Referência do local
+                  </p>
+                  <p className="text-sm text-foreground whitespace-pre-line">{local.referencia}</p>
+                </div>
+              </div>
+            )}
+
+            {(local?.fotos?.length ?? 0) > 0 && (
+              <div className="mt-2">
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground mb-1.5">
+                  <Camera className="w-3.5 h-3.5" />
+                  Fotos do local ({local!.fotos!.length})
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {local!.fotos!.map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noreferrer">
+                      <img
+                        src={url}
+                        alt={`Foto ${i + 1} do local`}
+                        className="w-20 h-20 rounded-lg object-cover border border-border hover:opacity-80 transition-opacity"
+                      />
+                    </a>
+                  ))}
+                </div>
+              </div>
             )}
           </Secao>
 
@@ -362,11 +439,19 @@ export default function FichaPedido({
                 </ul>
               )}
 
+              {/* Rotulada porque a ficha tem três notas parecidas: esta (só desta
+                  entrega), a do cliente e a do local. Sem rótulo, o balcão não
+                  sabe qual delas vai se repetir no próximo pedido. */}
               {despacho?.observacao && (
-                <p className="flex items-start gap-1.5 text-sm text-foreground bg-secondary rounded-lg px-3 py-2 mt-2">
+                <div className="flex items-start gap-2 rounded-lg bg-secondary px-3 py-2 mt-2">
                   <StickyNote className="w-4 h-4 shrink-0 mt-0.5 text-muted-foreground" />
-                  {despacho.observacao}
-                </p>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                      Nota desta entrega
+                    </p>
+                    <p className="text-sm text-foreground whitespace-pre-line">{despacho.observacao}</p>
+                  </div>
+                </div>
               )}
 
               {fotos.length > 0 && (
