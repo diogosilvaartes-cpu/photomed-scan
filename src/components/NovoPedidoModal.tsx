@@ -26,6 +26,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { brl } from "@/lib/status";
+import { calcularTaxa, carregarFreteConfig, FRETE_PADRAO, type FreteConfig } from "@/lib/frete";
 import { cn } from "@/lib/utils";
 
 const FORMAS_PAGAMENTO = ["PIX", "dinheiro", "débito", "crédito"];
@@ -91,6 +92,13 @@ export default function NovoPedidoModal({
   const [obsEntrega, setObsEntrega] = useState("");
   const [pessoaRecebimento, setPessoaRecebimento] = useState("");
 
+  // ─── frete ───
+  // A distância vem do atendente: o painel não geocodifica (ver src/lib/frete.ts).
+  // `taxaInput` vazio significa "usar a taxa calculada" — quem digita, sobrepõe.
+  const [freteCfg, setFreteCfg] = useState<FreteConfig>(FRETE_PADRAO);
+  const [distanciaKm, setDistanciaKm] = useState("");
+  const [taxaInput, setTaxaInput] = useState("");
+
   // ─── itens ───
   const [buscaItem, setBuscaItem] = useState("");
   const [sugestoes, setSugestoes] = useState<ItemEstoque[]>([]);
@@ -106,12 +114,19 @@ export default function NovoPedidoModal({
     setCriandoCliente(false); setNovoNome(""); setNovoTelefone("");
     setTipo("entrega"); setEnderecosCliente([]); setEnderecoSel(OUTRO); setEnderecoLivre("");
     setObsEntrega(""); setPessoaRecebimento("");
+    setDistanciaKm(""); setTaxaInput("");
     setBuscaItem(""); setSugestoes([]); setLinhas([]);
     setPagamento("PIX");
   }
 
   useEffect(() => {
     if (open) { resetar(); setTimeout(() => buscaClienteRef.current?.focus(), 80); }
+  }, [open]);
+
+  // A regra do frete mora em `configuracoes.frete_entrega` — relemos a cada abertura para
+  // o balcão nunca cobrar por uma tabela antiga.
+  useEffect(() => {
+    if (open) carregarFreteConfig().then(setFreteCfg);
   }, [open]);
 
   // Busca de cliente (debounce) — some assim que um cliente é escolhido.
@@ -246,10 +261,26 @@ export default function NovoPedidoModal({
     setLinhas((prev) => prev.map((l, i) => (i === idx ? { ...l, [campo]: valor } : l)));
   }
 
-  const total = linhas.reduce((s, l) => s + l.preco * l.quantidade, 0);
+  const totalProdutos = linhas.reduce((s, l) => s + l.preco * l.quantidade, 0);
+
+  // Frete: mesmo contrato do n8n — a taxa entra no valor_total e o detalhe fica nas colunas
+  // taxa_entrega / distancia_km. Ver `Consolida_Pedido` (Ana_Agente) e `AGA_Calcular`.
+  const kmDigitado = Number(distanciaKm.replace(",", "."));
+  const km = distanciaKm.trim() && Number.isFinite(kmDigitado) ? kmDigitado : null;
+  const freteCalc = calcularTaxa(km, freteCfg);
+  const foraDeArea = tipo === "entrega" && freteCalc.foraDeArea;
+  const taxaDigitada = Number(taxaInput.replace(",", "."));
+  const taxaEntrega =
+    tipo !== "entrega" || foraDeArea
+      ? 0
+      : taxaInput.trim() && Number.isFinite(taxaDigitada)
+        ? Math.max(0, taxaDigitada)
+        : freteCalc.taxa;
+  const totalPedido = totalProdutos + taxaEntrega;
+
   const endereco = enderecoSel === OUTRO ? enderecoLivre.trim() : enderecoSel;
   const podeSalvar =
-    !!cliente && linhas.length > 0 && (tipo === "retirada" || !!endereco) && !salvando;
+    !!cliente && linhas.length > 0 && (tipo === "retirada" || !!endereco) && !foraDeArea && !salvando;
 
   async function salvar() {
     if (!cliente) return;
@@ -264,7 +295,11 @@ export default function NovoPedidoModal({
           tipo_fulfillment: tipo,
           endereco: tipo === "entrega" ? endereco : null,
           pagamento,
-          valor_total: total > 0 ? total : null,
+          valor_total: totalPedido > 0 ? totalPedido : null,
+          // `frete_conferir` fica false: a distância veio de humano, não do geocoder.
+          taxa_entrega: tipo === "entrega" && taxaEntrega > 0 ? taxaEntrega : null,
+          distancia_km: tipo === "entrega" ? km : null,
+          frete_conferir: false,
           obs_entrega: obsEntrega.trim() || null,
           pessoa_recebimento: pessoaRecebimento.trim() || null,
           resumo: `Pedido do balcão — ${resumoItens}`,
@@ -293,7 +328,7 @@ export default function NovoPedidoModal({
 
       toast({
         title: `Pedido ${pedido.codigo ?? ""} criado`,
-        description: `${cliente.nome ?? cliente.telefone} — ${brl(total)}`,
+        description: `${cliente.nome ?? cliente.telefone} — ${brl(totalPedido)}`,
       });
       onDone();
       onClose();
@@ -486,9 +521,23 @@ export default function NovoPedidoModal({
                     </div>
                   </div>
                 ))}
-                <div className="flex items-center justify-between px-1 pt-1 border-t border-border">
-                  <span className="text-sm text-muted-foreground">Total</span>
-                  <span className="text-lg font-extrabold">{brl(total)}</span>
+                <div className="px-1 pt-2 border-t border-border space-y-1">
+                  {taxaEntrega > 0 && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Produtos</span>
+                        <span className="text-sm">{brl(totalProdutos)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Entrega</span>
+                        <span className="text-sm">{brl(taxaEntrega)}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Total</span>
+                    <span className="text-lg font-extrabold">{brl(totalPedido)}</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -540,6 +589,38 @@ export default function NovoPedidoModal({
                       onChange={(e) => setEnderecoLivre(e.target.value)}
                     />
                   </div>
+                )}
+                {/* Distância informada pelo atendente — o painel não geocodifica. A taxa sai
+                    da regra em `configuracoes.frete_entrega`, a mesma que a Ana usa. */}
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs text-muted-foreground">Distância (km)</Label>
+                    <Input
+                      type="number" min={0} step="0.1" inputMode="decimal"
+                      placeholder="ex.: 4,5"
+                      value={distanciaKm}
+                      onChange={(e) => setDistanciaKm(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs text-muted-foreground">Taxa de entrega</Label>
+                    <Input
+                      type="number" min={0} step="0.01" inputMode="decimal"
+                      placeholder={freteCalc.foraDeArea ? "—" : brl(freteCalc.taxa)}
+                      value={taxaInput}
+                      onChange={(e) => setTaxaInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+                {foraDeArea ? (
+                  <p className="text-xs font-medium text-status-cancelado">
+                    {distanciaKm} km passa do limite de {freteCfg.limite_km} km — a farmácia não entrega aí.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {brl(freteCfg.taxa_base)} até {freteCfg.raio_base_km} km, +{brl(freteCfg.taxa_por_km_extra)} por km
+                    acima disso. Deixe a taxa em branco para usar a calculada.
+                  </p>
                 )}
                 <Textarea
                   rows={2}
