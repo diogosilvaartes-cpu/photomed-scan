@@ -135,7 +135,7 @@ export function itensValidos(p: Pedido): Item[] {
  * (nó `Desp_Montar_Msg` do workflow Despacho_Motoboy).
  *
  * O bilhete é montado dos dados crus do pedido — nunca de `resumo`, que guarda
- * a fala da Ana **para o cliente** ("seu pedido está a caminho", endereço
+ * a fala da Maria **para o cliente** ("seu pedido está a caminho", endereço
  * repetido) e não serve para quem vai entregar.
  *
  * Duas linhas que só o WhatsApp tem: a referência do endereço (exige join com

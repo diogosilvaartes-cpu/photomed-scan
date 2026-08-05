@@ -13,23 +13,30 @@ import { fotoWhatsApp } from "@/lib/pedido";
 import { cn } from "@/lib/utils";
 
 /**
- * Aba Conversas — quem está falando com o cliente agora: a Ana ou o balcão.
+ * Conversas — quem está falando com o cliente agora: a Maria ou o balcão.
+ *
+ * Vive como aba dentro de /pedidos (05/08): olhar a fila e olhar quem está sendo
+ * atendido é o mesmo movimento do balcão.
  *
  * O handoff é automático: basta o atendente digitar no celular da farmácia
  * (`fromApi = false` no webhook da Z-API) e o n8n põe a conversa em
  * `aguardando_humano` com `pausada_ate = agora + 2h`. Enquanto esse prazo não
- * vence, o nó `IF_Ana_Pausada` (Ana_Agente) corta a execução antes do LLM: a Ana
+ * vence, o nó `IF_Ana_Pausada` (Ana_Agente) corta a execução antes do LLM: a Maria
  * fica calada e as mensagens do cliente só entram no histórico.
  *
  * Esta tela é o caminho de volta — e o de ida, para assumir sem precisar digitar.
  *
  * ⚠️ O prazo da pausa NÃO é definido aqui. Ele é o default de `pausar_ana` no
  * Postgres, que o n8n também usa omitindo o parâmetro. Um número só, num lugar só.
+ *
+ * ⚠️ Os nomes de nó e de RPC do n8n continuam com "Ana" de propósito — renomear
+ * `devolver_para_ana`/`IF_Ana_Pausada` exigiria acertar workflow e painel na mesma
+ * hora, e a troca pedida era do nome que o CLIENTE vê.
  */
 
 const POLL_MS = 20_000;
 
-/** Estados em que a Ana toca a conversa normalmente. */
+/** Estados em que a Maria toca a conversa normalmente. */
 const ESTADO_LABEL: Record<string, string> = {
   novo_contato: "Novo contato",
   entendendo_pedido: "Montando o pedido",
@@ -71,7 +78,7 @@ export function parseHistorico(raw: string | null): Turno[] {
 export type Pausa = { pausada: boolean; minutosRestantes: number };
 
 /**
- * A Ana só está de fato calada com as DUAS coisas: estado `aguardando_humano` e
+ * A Maria só está de fato calada com as DUAS coisas: estado `aguardando_humano` e
  * prazo no futuro. Com o prazo vencido ela já reassumiu sozinha, mesmo com o
  * estado ainda gravado — é exatamente essa diferença que a tela precisa mostrar,
  * senão o balcão acha que a conversa está segurada quando não está mais.
@@ -109,14 +116,89 @@ export function ordenarConversas(rows: ConversaRow[], agora: Date = new Date()):
   });
 }
 
-async function fetchConversas(): Promise<ConversaRow[]> {
+// ─── Agrupamento por número ──────────────────────────────────────────────────
+
+export type TurnoConsolidado = Turno & { conversaId: string; inicioDeConversa: boolean };
+
+export type ConversaAgrupada = {
+  /** Telefone só com dígitos; cai para cliente_id ou id quando não há telefone. */
+  chave: string;
+  /** Onde as ações agem: a que está segurada, ou a mais recente. */
+  principal: ConversaRow;
+  /** Todas as conversas do número, da mais recente para a mais antiga. */
+  conversas: ConversaRow[];
+  /** Histórico das várias conversas em ordem cronológica, do mais antigo ao mais novo. */
+  historico: TurnoConsolidado[];
+};
+
+const soDigitos = (t: string | null | undefined) => (t ?? "").replace(/\D/g, "");
+
+/**
+ * Um cliente vira VÁRIAS linhas em `conversas` — o `Insert_Conversa_HTTP` cria
+ * uma nova sempre que a anterior está em `pedido_criado`, e o mesmo número já
+ * acumulou 7 delas no banco. Sem agrupar, o balcão vê o mesmo cliente sete vezes
+ * na lista e não sabe qual abrir; pior, pode devolver para a Maria uma conversa
+ * velha enquanto a viva segue parada.
+ *
+ * A conversa "principal" é a que está segurada pelo balcão, se houver — é nela
+ * que os botões precisam agir. Sem nenhuma segurada, é a de movimento mais recente.
+ */
+export function agruparPorTelefone(
+  rows: ConversaRow[],
+  agora: Date = new Date(),
+): ConversaAgrupada[] {
+  const mapa = new Map<string, ConversaRow[]>();
+
+  for (const c of rows) {
+    const chave = soDigitos(c.clientes?.telefone) || c.cliente_id || c.id;
+    const lista = mapa.get(chave);
+    if (lista) lista.push(c);
+    else mapa.set(chave, [c]);
+  }
+
+  const grupos: ConversaAgrupada[] = [];
+
+  for (const [chave, lista] of mapa) {
+    const recentesPrimeiro = [...lista].sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    );
+    const segurada = recentesPrimeiro.find((c) => statusPausa(c.estado, c.pausada_ate, agora).pausada);
+
+    const historico: TurnoConsolidado[] = [];
+    // Ordem cronológica para ler de cima para baixo, como qualquer conversa.
+    for (const conversa of [...recentesPrimeiro].reverse()) {
+      const turnos = parseHistorico(conversa.resumo_contexto);
+      turnos.forEach((t, i) => {
+        historico.push({ ...t, conversaId: conversa.id, inicioDeConversa: i === 0 });
+      });
+    }
+
+    grupos.push({
+      chave,
+      principal: segurada ?? recentesPrimeiro[0],
+      conversas: recentesPrimeiro,
+      historico,
+    });
+  }
+
+  // A ordem da fila é a mesma de sempre, aplicada às principais.
+  const ordemPrincipais = ordenarConversas(grupos.map((g) => g.principal), agora);
+  const posicao = new Map(ordemPrincipais.map((c, i) => [c.id, i]));
+  return grupos.sort(
+    (a, b) => (posicao.get(a.principal.id) ?? 0) - (posicao.get(b.principal.id) ?? 0),
+  );
+}
+
+// ─── Busca de dados ──────────────────────────────────────────────────────────
+
+export async function fetchConversas(): Promise<ConversaRow[]> {
   const { data, error } = await externalSupabase
     .from("conversas")
     .select(
       "id, cliente_id, estado, ultima_mensagem, resumo_contexto, pausada_ate, updated_at, clientes(nome, telefone, foto_url)",
     )
     .order("updated_at", { ascending: false })
-    .limit(100);
+    .limit(200);
   if (error) throw error;
   return (data ?? []) as unknown as ConversaRow[];
 }
@@ -149,14 +231,14 @@ function SeloQuemAtende({ pausa }: { pausa: Pausa }) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-status-rua/15 text-status-ink-rua">
         <Headset className="w-3.5 h-3.5" />
-        Balcão · Ana volta em {formatarRestante(pausa.minutosRestantes)}
+        Balcão · Maria volta em {formatarRestante(pausa.minutosRestantes)}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary">
       <Bot className="w-3.5 h-3.5" />
-      Ana atendendo
+      Maria atendendo
     </span>
   );
 }
@@ -165,7 +247,7 @@ function SeloQuemAtende({ pausa }: { pausa: Pausa }) {
 function Bolha({ turno }: { turno: Turno }) {
   const ehCliente = turno.role === "cliente";
   const ehAtendente = turno.role === "atendente";
-  const autor = ehCliente ? "Cliente" : ehAtendente ? "Atendente (balcão)" : "Ana";
+  const autor = ehCliente ? "Cliente" : ehAtendente ? "Atendente (balcão)" : "Maria";
 
   return (
     <div className={cn("flex flex-col gap-1", ehCliente ? "items-start" : "items-end")}>
@@ -187,16 +269,18 @@ function Bolha({ turno }: { turno: Turno }) {
   );
 }
 
-function ConversaDrawer({ conversa, open, onClose }: {
-  conversa: ConversaRow | null;
+function ConversaDrawer({ grupo, open, onClose }: {
+  grupo: ConversaAgrupada | null;
   open: boolean;
   onClose: () => void;
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const historico = useMemo(() => parseHistorico(conversa?.resumo_contexto ?? null), [conversa]);
+  const conversa = grupo?.principal ?? null;
+  const historico = grupo?.historico ?? [];
   const pausa = conversa ? statusPausa(conversa.estado, conversa.pausada_ate) : { pausada: false, minutosRestantes: 0 };
+  const quantasConversas = grupo?.conversas.length ?? 0;
 
   const devolver = useMutation({
     mutationFn: async (estado: string) => {
@@ -213,7 +297,7 @@ function ConversaDrawer({ conversa, open, onClose }: {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["conversas"] });
       toast({
-        title: "Devolvido para a Ana",
+        title: "Devolvido para a Maria",
         description: "Ela responde de novo assim que o cliente mandar a próxima mensagem.",
       });
       onClose();
@@ -233,7 +317,7 @@ function ConversaDrawer({ conversa, open, onClose }: {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["conversas"] });
-      toast({ title: "Ana pausada", description: "O atendimento é seu. Ela não responde este cliente até você devolver." });
+      toast({ title: "Maria pausada", description: "O atendimento é seu. Ela não responde este cliente até você devolver." });
       onClose();
     },
     onError: (e: Error) =>
@@ -267,7 +351,13 @@ function ConversaDrawer({ conversa, open, onClose }: {
           <SeloQuemAtende pausa={pausa} />
           {pausa.pausada && conversa?.pausada_ate && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Se ninguém devolver, a Ana reassume sozinha às {horaCurta(conversa.pausada_ate)}.
+              Se ninguém devolver, a Maria reassume sozinha às {horaCurta(conversa.pausada_ate)}.
+            </p>
+          )}
+          {quantasConversas > 1 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {quantasConversas} atendimentos deste número reunidos aqui. Os botões agem no
+              atendimento atual.
             </p>
           )}
         </div>
@@ -276,7 +366,22 @@ function ConversaDrawer({ conversa, open, onClose }: {
           {historico.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">Sem histórico gravado.</p>
           ) : (
-            historico.map((t, i) => <Bolha key={i} turno={t} />)
+            historico.map((t, i) => (
+              <div key={`${t.conversaId}-${i}`} className="space-y-3">
+                {/* Divisor só entre atendimentos: o primeiro turno da lista não
+                    precisa de aviso de "outro atendimento". */}
+                {t.inicioDeConversa && i > 0 && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      outro atendimento
+                    </span>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                )}
+                <Bolha turno={t} />
+              </div>
+            ))
           )}
         </div>
 
@@ -289,7 +394,7 @@ function ConversaDrawer({ conversa, open, onClose }: {
                 onClick={() => devolver.mutate("entendendo_pedido")}
               >
                 {devolver.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
-                Devolver para a Ana
+                Devolver para a Maria
               </Button>
               <Button
                 variant="ghost"
@@ -314,7 +419,7 @@ function ConversaDrawer({ conversa, open, onClose }: {
                 onClick={() => pausar.mutate()}
               >
                 {pausar.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Pause className="w-4 h-4 mr-2" />}
-                Assumir eu mesmo (pausar a Ana)
+                Assumir eu mesmo (pausar a Maria)
               </Button>
               <p className="text-[11px] text-muted-foreground text-center">
                 Digitar para o cliente no celular da farmácia já faz isso sozinho.
@@ -327,11 +432,16 @@ function ConversaDrawer({ conversa, open, onClose }: {
   );
 }
 
-// ─── Página ──────────────────────────────────────────────────────────────────
-export default function Conversas() {
+// ─── Página / aba ────────────────────────────────────────────────────────────
+
+/**
+ * `embutido` = renderizada como aba dentro de /pedidos, que já tem o próprio
+ * cabeçalho e a própria busca. A rota /conversas antiga redireciona para lá.
+ */
+export default function Conversas({ embutido = false }: { embutido?: boolean }) {
   const [busca, setBusca] = useState("");
   const [soBalcao, setSoBalcao] = useState(false);
-  const [aberta, setAberta] = useState<ConversaRow | null>(null);
+  const [abertaChave, setAbertaChave] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["conversas"],
@@ -341,39 +451,43 @@ export default function Conversas() {
     refetchInterval: POLL_MS,
   });
 
+  const grupos = useMemo(() => agruparPorTelefone(data ?? []), [data]);
+
   const lista = useMemo(() => {
-    const rows = ordenarConversas(data ?? []);
     const termo = busca.trim().toLowerCase();
-    return rows.filter((c) => {
-      if (soBalcao && !statusPausa(c.estado, c.pausada_ate).pausada) return false;
+    return grupos.filter((g) => {
+      const p = g.principal;
+      if (soBalcao && !statusPausa(p.estado, p.pausada_ate).pausada) return false;
       if (!termo) return true;
       return (
-        (c.clientes?.nome ?? "").toLowerCase().includes(termo) ||
-        (c.clientes?.telefone ?? "").includes(termo)
+        (p.clientes?.nome ?? "").toLowerCase().includes(termo) ||
+        (p.clientes?.telefone ?? "").includes(termo)
       );
     });
-  }, [data, busca, soBalcao]);
+  }, [grupos, busca, soBalcao]);
 
   const emEspera = useMemo(
-    () => (data ?? []).filter((c) => statusPausa(c.estado, c.pausada_ate).pausada).length,
-    [data],
+    () => grupos.filter((g) => statusPausa(g.principal.estado, g.principal.pausada_ate).pausada).length,
+    [grupos],
   );
 
-  // O drawer lê da lista para não mostrar dados velhos depois de um refetch.
-  const conversaAberta = aberta ? (data ?? []).find((c) => c.id === aberta.id) ?? aberta : null;
+  // O drawer lê da lista viva para não mostrar dados velhos depois de um refetch.
+  const grupoAberto = abertaChave ? grupos.find((g) => g.chave === abertaChave) ?? null : null;
 
   return (
-    <div className="p-4 md:p-8">
+    <div className={embutido ? "p-4" : "p-4 md:p-8"}>
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-center gap-3 mb-6">
-          <MessagesSquare className="w-6 h-6 text-primary" />
-          <h1 className="text-2xl font-bold text-foreground">Conversas</h1>
-          {emEspera > 0 && (
-            <Badge className="ml-auto bg-status-rua/15 text-status-ink-rua hover:bg-status-rua/15">
-              {emEspera} com o balcão
-            </Badge>
-          )}
-        </div>
+        {!embutido && (
+          <div className="flex items-center gap-3 mb-6">
+            <MessagesSquare className="w-6 h-6 text-primary" />
+            <h1 className="text-2xl font-bold text-foreground">Conversas</h1>
+            {emEspera > 0 && (
+              <Badge className="ml-auto bg-status-rua/15 text-status-ink-rua hover:bg-status-rua/15">
+                {emEspera} com o balcão
+              </Badge>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row gap-2 mb-4">
           <div className="relative flex-1">
@@ -414,12 +528,13 @@ export default function Conversas() {
         )}
 
         <div className="space-y-2">
-          {lista.map((c) => {
+          {lista.map((g) => {
+            const c = g.principal;
             const pausa = statusPausa(c.estado, c.pausada_ate);
             return (
               <button
-                key={c.id}
-                onClick={() => setAberta(c)}
+                key={g.chave}
+                onClick={() => setAbertaChave(g.chave)}
                 className={cn(
                   "w-full text-left rounded-xl border bg-card p-3 transition-colors hover:bg-secondary/60",
                   pausa.pausada ? "border-status-rua/40" : "border-border",
@@ -436,6 +551,11 @@ export default function Conversas() {
                       <p className="font-semibold text-foreground truncate">
                         {c.clientes?.nome ?? c.clientes?.telefone ?? "Cliente"}
                       </p>
+                      {g.conversas.length > 1 && (
+                        <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground">
+                          {g.conversas.length} atendimentos
+                        </span>
+                      )}
                       <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
                         <Clock className="w-3 h-3" />
                         {horaCurta(c.updated_at)}
@@ -456,9 +576,9 @@ export default function Conversas() {
       </div>
 
       <ConversaDrawer
-        conversa={conversaAberta}
-        open={!!aberta}
-        onClose={() => setAberta(null)}
+        grupo={grupoAberto}
+        open={!!abertaChave}
+        onClose={() => setAbertaChave(null)}
       />
     </div>
   );

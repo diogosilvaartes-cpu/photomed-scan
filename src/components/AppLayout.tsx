@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Package, Users, Truck, LogOut, Search, ClipboardList, Bike, MessagesSquare } from "lucide-react";
+import { Package, Users, Truck, LogOut, Search, ClipboardList, Bike, UsersRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/BrandMark";
 import EntregaToggle from "@/components/EntregaToggle";
@@ -18,12 +18,13 @@ interface NavItem {
 
 /** Ordem de trabalho do balcão: a fila primeiro, o resto em volta dela. */
 const NAV_ITEMS: NavItem[] = [
+  // Conversas não está mais aqui: virou aba dentro de Pedidos, junto da fila —
+  // ver quem a Maria está atendendo faz parte de olhar o mesmo movimento.
   { to: "/pedidos", icon: <ClipboardList className="w-5 h-5" />, label: "Pedidos" },
-  // Logo depois da fila: é aqui que se vê se a Ana está calada esperando o balcão.
-  { to: "/conversas", icon: <MessagesSquare className="w-5 h-5" />, label: "Conversas", adminOnly: true },
   { to: "/estoque", icon: <Package className="w-5 h-5" />, label: "Estoque", adminOnly: true },
   { to: "/clientes", icon: <Users className="w-5 h-5" />, label: "Clientes" },
   { to: "/entregadores", icon: <Bike className="w-5 h-5" />, label: "Entregadores", adminOnly: true },
+  { to: "/equipe", icon: <UsersRound className="w-5 h-5" />, label: "Equipe", adminOnly: true },
   // Lupa, não frasco de laboratório: o SCAN é "procurar o que é este remédio",
   // e a lupa é o que o balcão reconhece de imediato na fileira de ícones.
   { to: "/scan", icon: <Search className="w-5 h-5" />, label: "Scan", adminOnly: true },
@@ -68,7 +69,7 @@ function NavItems({ onClick }: { onClick?: () => void }) {
 }
 
 function UserInfo() {
-  const { user, role, entregadorNome, signOut } = useAuth();
+  const { user, perfil, nomeExibicao, signOut } = useAuth();
   const navigate = useNavigate();
 
   async function handleSignOut() {
@@ -76,7 +77,8 @@ function UserInfo() {
     navigate("/login");
   }
 
-  const displayName = role === "entregador" ? entregadorNome : "Admin";
+  // Quem está cadastrado na equipe aparece pelo nome; o admin raiz não tem cadastro.
+  const displayName = nomeExibicao ?? (perfil === "balcao" ? "Balcão" : "Admin");
   const displayEmail = user?.email ?? "";
 
   return (
@@ -114,7 +116,7 @@ function SidebarContent() {
         </div>
       </div>
 
-      {/* Os dois estados que decidem o que a Ana responde, no topo e nesta ordem:
+      {/* Os dois estados que decidem o que a Maria responde, no topo e nesta ordem:
           "a farmácia atende?" vem antes de "a farmácia entrega?" — fechada, o
           toggle de entrega não muda nada para o cliente. */}
       <div className="pt-4">

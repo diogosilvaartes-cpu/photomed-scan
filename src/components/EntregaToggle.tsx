@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  * Botão de "entrega disponível" — o balcão desliga quando o motoboy sai e liga quando volta.
  *
  * Lê e escreve `configuracoes.entrega_disponivel`, a mesma linha que o n8n consulta a cada
- * mensagem do WhatsApp (nó Buscar_Horario → Montar_Prompt). Desligado, a Ana para de
+ * mensagem do WhatsApp (nó Buscar_Horario → Montar_Prompt). Desligado, a Maria para de
  * oferecer entrega e passa a oferecer retirada na loja.
  *
  * ⚠️ `ultimo_estado_aberta` NUNCA pode ser alterado daqui. Esse campo é do

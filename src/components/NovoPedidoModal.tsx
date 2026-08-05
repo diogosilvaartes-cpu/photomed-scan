@@ -1,5 +1,5 @@
 /**
- * Pedido criado internamente, pelo balcão — sem passar pela Ana no WhatsApp.
+ * Pedido criado internamente, pelo balcão — sem passar pela Maria no WhatsApp.
  *
  * Atalho para cliente recorrente: ao escolher o cliente, endereço, pagamento e
  * tipo de entrega vêm pré-preenchidos do último pedido dele. No caso comum
@@ -591,7 +591,7 @@ export default function NovoPedidoModal({
                   </div>
                 )}
                 {/* Distância informada pelo atendente — o painel não geocodifica. A taxa sai
-                    da regra em `configuracoes.frete_entrega`, a mesma que a Ana usa. */}
+                    da regra em `configuracoes.frete_entrega`, a mesma que a Maria usa. */}
                 <div className="flex items-end gap-2">
                   <div className="flex-1 space-y-1">
                     <Label className="text-xs text-muted-foreground">Distância (km)</Label>

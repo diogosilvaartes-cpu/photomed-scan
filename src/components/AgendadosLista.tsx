@@ -126,11 +126,13 @@ function Card({
   onAbrirPedido,
   onConfirmar,
   onLiberar,
+  onCancelar,
 }: {
   a: PedidoAgendado;
   onAbrirPedido?: (id: string) => void;
   onConfirmar?: (a: PedidoAgendado) => Promise<void>;
   onLiberar?: (a: PedidoAgendado) => Promise<void>;
+  onCancelar?: (a: PedidoAgendado) => Promise<void>;
 }) {
   const cfg = cfgDe(a.status);
   const itens = itensDe(a);
@@ -138,7 +140,12 @@ function Card({
   const [perguntando, setPerguntando] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
   const [liberando, setLiberando] = useState(false);
+  const [perguntandoCancelar, setPerguntandoCancelar] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
   const podeConfirmar = !!onConfirmar && AGENDADO_PENDENTES.includes(a.status);
+  // Mesma janela do confirmar: enquanto o agendamento estiver vivo, o balcão
+  // pode desfazer. Depois de virar pedido, quem cancela é a fila (aba Kanban).
+  const podeCancelar = !!onCancelar && AGENDADO_PENDENTES.includes(a.status);
   // Liberar é o passo ANTES de confirmar: manda os botões ao cliente e deixa
   // ele decidir. Só faz sentido enquanto ninguém foi chamado ainda.
   const podeLiberar =
@@ -160,6 +167,15 @@ function Card({
       await onLiberar!(a);
     } finally {
       setLiberando(false);
+    }
+  }
+
+  async function cancelar() {
+    setCancelando(true);
+    try {
+      await onCancelar!(a);
+    } finally {
+      setCancelando(false);
     }
   }
 
@@ -302,6 +318,49 @@ function Card({
               </AlertDialog>
             </>
           )}
+
+          {podeCancelar && (
+            <>
+              <button
+                onClick={() => setPerguntandoCancelar(true)}
+                disabled={cancelando || confirmando}
+                title="Cancelar o agendamento e avisar o cliente"
+                aria-label="Cancelar agendamento"
+                className={cn(
+                  "inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-status-cancelado/10 text-sm font-bold text-status-ink-cancelado hover:bg-status-cancelado/20 transition-colors",
+                  cancelando && "opacity-60 cursor-not-allowed",
+                )}
+              >
+                {cancelando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                Cancelar
+              </button>
+
+              <AlertDialog open={perguntandoCancelar} onOpenChange={setPerguntandoCancelar}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Cancelar o agendamento {a.codigo ?? ""}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {a.nome_cliente || "Cliente"}
+                      {itens.length ? ` · ${itens.length} ${itens.length === 1 ? "item" : "itens"}` : ""}
+                      {a.valor_total ? ` · ${brl(a.valor_total)}` : ""}.
+                      <br />
+                      O agendamento sai da fila e o cliente recebe no WhatsApp o aviso de
+                      que foi cancelado. Não dá para desfazer por aqui.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Voltar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={cancelar}
+                      className="bg-status-cancelado text-white hover:bg-status-cancelado/90"
+                    >
+                      Cancelar agendamento
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -313,11 +372,13 @@ export default function AgendadosLista({
   onAbrirPedido,
   onConfirmar,
   onLiberar,
+  onCancelar,
 }: {
   agendados: PedidoAgendado[];
   onAbrirPedido?: (pedidoId: string) => void;
   onConfirmar?: (a: PedidoAgendado) => Promise<void>;
   onLiberar?: (a: PedidoAgendado) => Promise<void>;
+  onCancelar?: (a: PedidoAgendado) => Promise<void>;
 }) {
   const pendentes = agendados.filter((a) => AGENDADO_PENDENTES.includes(a.status));
   const encerrados = agendados.filter((a) => !AGENDADO_PENDENTES.includes(a.status));
@@ -350,6 +411,7 @@ export default function AgendadosLista({
                 onAbrirPedido={onAbrirPedido}
                 onConfirmar={onConfirmar}
                 onLiberar={onLiberar}
+                onCancelar={onCancelar}
               />
             ))}
           </div>

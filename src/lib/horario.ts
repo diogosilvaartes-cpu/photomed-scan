@@ -9,7 +9,7 @@
  * `calcHorario` é uma tradução 1-para-1 de `N8N FARMA/AGENDAMENTO/calc_horario.js`,
  * que é injetado nos Code nodes `Montar_Prompt` e `AGL_Esta_Aberta`. As duas
  * cópias precisam concordar: se divergirem, o painel mostra "aberta" enquanto a
- * Ana manda o cliente agendar. Ao mexer numa, mexer na outra —
+ * Maria manda o cliente agendar. Ao mexer numa, mexer na outra —
  * `src/test/horario.test.ts` guarda os casos de borda.
  */
 
@@ -163,7 +163,7 @@ export function proximaTransicao(cfgRaw: unknown, nowMs: number = Date.now()): s
  * Config nova para o clique do balcão em "abrir"/"fechar".
  *
  * Função pura e exportada porque é onde mora o risco: um override sem `ate`
- * fica ligado para sempre, e "abri às 22h para um cliente" vira a Ana atendendo
+ * fica ligado para sempre, e "abri às 22h para um cliente" vira a Maria atendendo
  * todas as madrugadas. O `ate` é sempre a próxima virada natural.
  *
  * `abrir === null` limpa o override (volta ao automático).

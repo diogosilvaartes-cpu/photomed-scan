@@ -10,7 +10,7 @@ import { calcHorario, proximoOverride, parseConfig, type ConfigHorario } from "@
 import { cn } from "@/lib/utils";
 
 /**
- * Botão "Farmácia aberta" — o estado que decide se a Ana atende ou manda agendar.
+ * Botão "Farmácia aberta" — o estado que decide se a Maria atende ou manda agendar.
  *
  * NORMALMENTE NINGUÉM PRECISA TOCAR NELE: o estado vem da tabela semanal em
  * `configuracoes.horario_funcionamento`, que abre às 08:00 e fecha às 20:00
@@ -19,11 +19,11 @@ import { cn } from "@/lib/utils";
  *
  * O clique escreve `override` na MESMA config que o n8n lê a cada mensagem
  * (`Buscar_Horario` → `Montar_Prompt` no Ana_Agente, e o `IF_Fora_Horario` que
- * desvia para o agendamento). Por isso não há nada a fazer no n8n: ligado, a Ana
+ * desvia para o agendamento). Por isso não há nada a fazer no n8n: ligado, a Maria
  * atende normalmente; desligado, ela informa o horário e oferece agendamento.
  *
  * ⚠️ O override SEMPRE nasce com prazo (`ate` = próxima virada da tabela). Sem
- * prazo, "abri às 22h para um cliente" viraria a Ana atendendo todas as
+ * prazo, "abri às 22h para um cliente" viraria a Maria atendendo todas as
  * madrugadas seguintes, e ninguém lembraria de desligar. A regra mora em
  * `proximoOverride()`, coberta por `src/test/horario.test.ts`.
  *
@@ -153,13 +153,13 @@ export default function FarmaciaToggle({
           <AlertDialogDescription>
             {aberta ? (
               <>
-                Ainda é horário de funcionamento. Fechando, a Ana <b>para de aceitar
+                Ainda é horário de funcionamento. Fechando, a Maria <b>para de aceitar
                 pedidos</b>, informa o horário e oferece agendamento para a próxima
                 abertura.
               </>
             ) : (
               <>
-                A farmácia está fora do horário. Abrindo, a Ana passa a <b>atender
+                A farmácia está fora do horário. Abrindo, a Maria passa a <b>atender
                 normalmente</b>, como em qualquer dia útil.
               </>
             )}
@@ -237,7 +237,7 @@ export default function FarmaciaToggle({
               {aberta ? "Farmácia ABERTA" : "Farmácia FECHADA"}
             </p>
             <p className="text-xs font-semibold text-white/85 leading-tight">
-              {aberta ? "A Ana atende normalmente" : "A Ana oferece agendamento"}
+              {aberta ? "A Maria atende normalmente" : "A Maria oferece agendamento"}
             </p>
           </div>
         </div>

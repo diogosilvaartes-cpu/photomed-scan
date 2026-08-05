@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import {
   Loader2, RefreshCw, Phone, CreditCard, Package, ChevronRight, X, Clock,
   Truck, Navigation, LocateFixed, CheckCircle, Eye, FileText, History, Plus, AlarmClock, Search,
-  CalendarDays,
+  CalendarDays, MessagesSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -28,6 +30,9 @@ import EnderecoLink from "@/components/EnderecoLink";
 import AgendadosLista, {
   type PedidoAgendado, AGENDADO_SELECT, AGENDADO_PENDENTES,
 } from "@/components/AgendadosLista";
+import Conversas, {
+  fetchConversas, agruparPorTelefone, statusPausa,
+} from "@/pages/Conversas";
 import {
   type Pedido, type EntregadorFull,
   PEDIDO_SELECT, formatPhone, formatCurrency, timeAgo, pedidoNumero,
@@ -938,7 +943,12 @@ export default function Pedidos() {
   // tela achando que sumiram os pedidos de ontem que ainda estão na rua.
   const [busca, setBusca] = useState("");
   const [dia, setDia] = useState<string | null>(null);
-  const [aba, setAba] = useState<"kanban" | "na_rua" | "agendados" | "historico">("kanban");
+  // `?aba=conversas` existe para a rota antiga /conversas continuar levando ao
+  // lugar certo — o item saiu do menu e virou aba daqui.
+  const [searchParams] = useSearchParams();
+  const [aba, setAba] = useState<"kanban" | "na_rua" | "agendados" | "historico" | "conversas">(
+    searchParams.get("aba") === "conversas" ? "conversas" : "kanban",
+  );
   const [agendados, setAgendados] = useState<PedidoAgendado[]>([]);
   const [despacharPedido, setDespacharPedido] = useState<Pedido | null>(null);
   const [novoPedido, setNovoPedido] = useState(false);
@@ -1024,6 +1034,45 @@ export default function Pedidos() {
     } catch (e) {
       toast({
         title: "Não deu para confirmar",
+        description: e instanceof Error ? e.message : "Falha ao falar com o n8n.",
+        variant: "destructive",
+      });
+    }
+  }
+
+  /**
+   * Cancela um agendamento pelo balcão.
+   *
+   * Vai pelo MESMO webhook do confirmar, só que com `acao: "NAO"` — o ramo de
+   * cancelamento já existe inteiro no WF_Agendamento_Confirmar (AGC_Cancelar
+   * baixa a linha, AGC_Msg_Cancelado avisa o cliente no WhatsApp). Gravar
+   * `status: 'cancelado'` direto daqui seria mais curto e deixaria o cliente sem
+   * aviso nenhum — foi assim que o painel já divergiu do n8n três vezes.
+   */
+  async function cancelarAgendado(a: PedidoAgendado) {
+    try {
+      const r = await fetch("/api/agendamento-confirmar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agendado_id: a.id,
+          acao: "NAO",
+          telefone: a.telefone,
+          nome: a.nome_cliente ?? "Cliente",
+        }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({} as { error?: string }));
+        throw new Error(d.error ?? `HTTP ${r.status}`);
+      }
+      toast({
+        title: "Agendamento cancelado",
+        description: "O cliente foi avisado no WhatsApp.",
+      });
+      setTimeout(() => load(true), 2000);
+    } catch (e) {
+      toast({
+        title: "Não deu para cancelar",
         description: e instanceof Error ? e.message : "Falha ao falar com o n8n.",
         variant: "destructive",
       });
@@ -1119,6 +1168,19 @@ export default function Pedidos() {
   // Só os vivos entram no badge, e sobre a lista INTEIRA: o badge é alerta de
   // trabalho parado, não pode sumir só porque o balcão filtrou por "hoje".
   const agendadosPendentes = agendados.filter((a) => AGENDADO_PENDENTES.includes(a.status)).length;
+
+  // Mesma queryKey que a aba Conversas usa: o react-query serve as duas do mesmo
+  // cache, então isto não é uma segunda ida ao banco. Serve para o badge — sem o
+  // item no menu lateral, é o que avisa que tem cliente esperando o balcão.
+  const { data: conversasRows } = useQuery({
+    queryKey: ["conversas"],
+    queryFn: fetchConversas,
+    refetchInterval: 20_000,
+    enabled: !readOnly,
+  });
+  const conversasComBalcao = agruparPorTelefone(conversasRows ?? []).filter(
+    (g) => statusPausa(g.principal.estado, g.principal.pausada_ate).pausada,
+  ).length;
   // Cards e ficha usam a lista toda (pedido antigo pode ter entregador já desativado);
   // só o despacho oferece exclusivamente quem está ativo.
   const entregadoresAtivos = entregadores.filter((e) => e.ativo);
@@ -1214,6 +1276,28 @@ export default function Pedidos() {
               </span>
             )}
           </button>
+          {/* Conversas era item do menu lateral; virou aba porque atender e
+              despachar são o mesmo movimento do balcão. Entregador não vê. */}
+          {!readOnly && (
+            <button
+              onClick={() => setAba("conversas")}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
+                aba === "conversas" ? "bg-status-rua text-white" : "text-muted-foreground hover:bg-secondary"
+              )}
+            >
+              <MessagesSquare className="w-4 h-4" />
+              Conversas
+              {conversasComBalcao > 0 && (
+                <span className={cn(
+                  "px-1.5 py-0.5 rounded-full text-xs font-bold",
+                  aba === "conversas" ? "bg-white/20 text-white" : "bg-status-rua text-white"
+                )}>
+                  {conversasComBalcao}
+                </span>
+              )}
+            </button>
+          )}
           <button
             onClick={() => setAba("historico")}
             className={cn(
@@ -1226,8 +1310,9 @@ export default function Pedidos() {
           </button>
         </div>
 
-        {/* Busca + dia — valem para todas as abas */}
-        <div className="mt-3 space-y-2">
+        {/* Busca + dia — valem para as abas de pedido. Conversas tem a própria
+            busca (por nome/telefone) e não conhece dia nem status. */}
+        <div className={cn("mt-3 space-y-2", aba === "conversas" && "hidden")}>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
             <input
@@ -1360,7 +1445,15 @@ export default function Pedidos() {
             onAbrirPedido={(id) => { setFichaId(id); setAba("kanban"); }}
             onConfirmar={readOnly ? undefined : confirmarAgendado}
             onLiberar={readOnly ? undefined : liberarAgendado}
+            onCancelar={readOnly ? undefined : cancelarAgendado}
           />
+        </div>
+      )}
+
+      {/* ── ABA CONVERSAS ── */}
+      {aba === "conversas" && !readOnly && (
+        <div className="flex-1 overflow-y-auto">
+          <Conversas embutido />
         </div>
       )}
 

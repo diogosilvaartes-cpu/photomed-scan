@@ -260,7 +260,7 @@ export default function FichaPedido({
             )}
             {itens.length > 0 && pedido.resumo && (
               <p className="text-xs text-muted-foreground italic border-t border-border pt-2 mt-2">
-                Resumo da Ana: {pedido.resumo}
+                Resumo da Maria: {pedido.resumo}
               </p>
             )}
           </Secao>

@@ -3,7 +3,7 @@ import { Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Truck, User, MapPin, Phone, Package, Loader2,
-  CheckCircle, Clock, Navigation,
+  CheckCircle, Clock, Navigation, Ban,
   LocateFixed, LogOut, Camera, MessageSquare, X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -144,6 +148,45 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
       qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
     },
     onError: () => toast({ title: "Erro", variant: "destructive" }),
+  });
+
+  /**
+   * Cancelar a entrega na rua — cliente ausente, endereço que não existe,
+   * desistência na porta. Antes disso o entregador tinha que ligar para o balcão
+   * e o pedido ficava aberto no Kanban a tarde inteira.
+   *
+   * Baixa as duas pontas (pedido e despacho) porque quem olha o Kanban lê
+   * `pedidos.status` e quem olha o monitor de entregas lê `status_entrega` —
+   * mexer só em uma deixa a outra tela mentindo.
+   *
+   * De propósito NÃO avisa o cliente: a regra da casa é que o WhatsApp do
+   * cancelamento sai do balcão, que sabe o que combinar (remarcar, devolver
+   * pagamento). O balcão vê o cancelamento na fila em segundos.
+   */
+  const [confirmarCancelar, setConfirmarCancelar] = useState(false);
+
+  const cancelarPedido = useMutation({
+    mutationFn: async () => {
+      const { error } = await externalSupabase
+        .from("pedidos").update({ status: "cancelado" }).eq("id", pedido.id);
+      if (error) throw error;
+      if (despacho) {
+        const { error: e2 } = await externalSupabase
+          .from("despacho_entrega")
+          .update({ status_entrega: "cancelado" })
+          .eq("id", despacho.id);
+        if (e2) throw e2;
+      }
+    },
+    onSuccess: () => {
+      toast({
+        title: "Pedido cancelado",
+        description: "Avise o balcão pelo WhatsApp para eles falarem com o cliente.",
+      });
+      qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Não deu para cancelar", description: e.message, variant: "destructive" }),
   });
 
   const chegarAoLocal = useMutation({
@@ -681,6 +724,48 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
             ? <><CheckCircle className="w-4 h-4 mr-2" />Entregue</>
             : <><CheckCircle className="w-4 h-4 mr-2" />Marcar como entregue</>}
         </Button>
+
+        {!entregue && (
+          <>
+            <Button
+              className="w-full text-status-ink-cancelado hover:text-status-ink-cancelado hover:bg-status-cancelado/10"
+              variant="ghost"
+              onClick={() => setConfirmarCancelar(true)}
+              disabled={cancelarPedido.isPending}>
+              {cancelarPedido.isPending
+                ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                : <Ban className="w-4 h-4 mr-2" />}
+              Cancelar pedido
+            </Button>
+
+            <AlertDialog open={confirmarCancelar} onOpenChange={setConfirmarCancelar}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Cancelar o pedido {pedido.codigo ?? ""}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {nomeCliente}
+                    {pedido.itens_pedido?.length
+                      ? ` · ${pedido.itens_pedido.length} ${pedido.itens_pedido.length === 1 ? "item" : "itens"}`
+                      : ""}
+                    {pedido.valor_total != null ? ` · R$ ${pedido.valor_total.toFixed(2)}` : ""}.
+                    <br />
+                    A entrega é encerrada e o pedido sai da fila do balcão. O cliente
+                    <b> não</b> é avisado automaticamente — combine com o balcão.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Voltar</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => cancelarPedido.mutate()}
+                    className="bg-status-cancelado text-white hover:bg-status-cancelado/90"
+                  >
+                    Cancelar pedido
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
+        )}
       </div>}
 
       {/* Pagamento recebido registrado */}

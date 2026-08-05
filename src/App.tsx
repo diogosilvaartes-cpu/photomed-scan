@@ -11,9 +11,9 @@ import Estoque from "./pages/Estoque.tsx";
 import Pedidos from "./pages/Pedidos.tsx";
 import Login from "./pages/Login.tsx";
 import Clientes from "./pages/Clientes.tsx";
-import Conversas from "./pages/Conversas.tsx";
 import Entregas from "./pages/Entregas.tsx";
 import Entregadores from "./pages/Entregadores.tsx";
+import Equipe from "./pages/Equipe.tsx";
 import PedidoLink from "./pages/PedidoLink.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -63,10 +63,13 @@ function AppRoutes() {
       {/* Entregador também acessa, em modo leitura (a própria página esconde as ações) */}
       <Route path="/pedidos" element={<ProtectedRoute><Pedidos /></ProtectedRoute>} />
       <Route path="/clientes" element={<ProtectedRoute><Clientes /></ProtectedRoute>} />
-      {/* Quem atende cada conversa (Ana ou balcão) e o botão de devolver — tela do balcão */}
-      <Route path="/conversas" element={<ProtectedRoute adminOnly><Conversas /></ProtectedRoute>} />
+      {/* Conversas virou aba dentro de /pedidos: atendimento e fila no mesmo lugar.
+          A rota antiga continua respondendo para não quebrar link salvo. */}
+      <Route path="/conversas" element={<Navigate to="/pedidos?aba=conversas" replace />} />
       <Route path="/entregas" element={<ProtectedRoute><Entregas /></ProtectedRoute>} />
       <Route path="/entregadores" element={<ProtectedRoute adminOnly><Entregadores /></ProtectedRoute>} />
+      {/* Cadastro e login de quem trabalha aqui — entregadores e balcão */}
+      <Route path="/equipe" element={<ProtectedRoute adminOnly><Equipe /></ProtectedRoute>} />
       {/* Link do WhatsApp: o entregador também abre, a ficha se vira sozinha em leitura */}
       <Route path="/pedido/:codigo" element={<ProtectedRoute><PedidoLink /></ProtectedRoute>} />
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

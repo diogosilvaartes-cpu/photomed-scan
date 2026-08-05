@@ -5,7 +5,7 @@ import { calcHorario, proximaTransicao, proximoOverride, type ConfigHorario } fr
  * A regra do horário mora na config, mas a INTERPRETAÇÃO dela existe em dois
  * lugares: aqui e no `calc_horario.js` injetado nos Code nodes do n8n. Estes
  * testes são o que impede as duas de divergirem em silêncio — o sintoma seria o
- * painel dizendo "aberta" enquanto a Ana manda o cliente agendar.
+ * painel dizendo "aberta" enquanto a Maria manda o cliente agendar.
  */
 
 // Horário real da farmácia: 8–20 seg-sex, 8–14 sáb, domingo fechado.

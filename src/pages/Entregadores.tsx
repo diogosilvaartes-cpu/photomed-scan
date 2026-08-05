@@ -1,21 +1,15 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
-  Truck, Users, History, Loader2, MapPin, Phone, Navigation, KeyRound,
+  Truck, History, Loader2, MapPin, Phone, Navigation,
   Clock, CheckCircle, AlertTriangle, Radio, Package, TrendingUp, Search,
-  LocateFixed, Camera, DollarSign, PackageCheck, UserPlus, Power,
+  LocateFixed, Camera, DollarSign, PackageCheck,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { externalSupabase, pinToPassword } from "@/integrations/supabase/external-client";
+import { externalSupabase } from "@/integrations/supabase/external-client";
 import { cn } from "@/lib/utils";
 import { brl, moneyClass } from "@/lib/status";
 import FichaPedidoPorId from "@/components/FichaPedidoPorId";
@@ -516,317 +510,6 @@ function AbaAoVivo({ despachos }: { despachos: DespachoFull[] }) {
   );
 }
 
-// ─── Aba: Equipe (controle dos entregadores) ──────────────────────────────────
-
-function PinInput({ pin, setPin, pinRefs }: {
-  pin: string[];
-  setPin: (p: string[]) => void;
-  pinRefs: React.RefObject<HTMLInputElement>[];
-}) {
-  function handleChange(index: number, value: string) {
-    const digit = value.replace(/\D/g, "").slice(-1);
-    const next = [...pin]; next[index] = digit; setPin(next);
-    if (digit && index < 3) pinRefs[index + 1].current?.focus();
-  }
-  function handleKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Backspace" && !pin[index] && index > 0) pinRefs[index - 1].current?.focus();
-  }
-  return (
-    <div className="flex gap-3 justify-center">
-      {pin.map((digit, i) => (
-        <input key={i} ref={pinRefs[i]} type="number" inputMode="numeric" min={0} max={9}
-          value={digit} onChange={(e) => handleChange(i, e.target.value)} onKeyDown={(e) => handleKeyDown(i, e)}
-          className="w-12 h-14 text-center text-xl font-bold rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-      ))}
-    </div>
-  );
-}
-
-/** Métricas agregadas de um entregador, calculadas a partir dos despachos. */
-function metricasDe(entregadorId: string, despachos: DespachoFull[]) {
-  const meus = despachos.filter((d) => d.entregador_id === entregadorId);
-  const entregues = meus.filter((d) => d.entregue_em);
-  const hoje = new Date().toDateString();
-  const entreguesHoje = entregues.filter((d) => new Date(d.entregue_em!).toDateString() === hoje);
-  const ativos = meus.filter(estaAtivo);
-
-  const tempos = entregues
-    .map((d) => minutosEntre(d.saiu_em, d.entregue_em))
-    .filter((t): t is number => t != null && t >= 0);
-  const tempoMedio = tempos.length ? tempos.reduce((s, t) => s + t, 0) / tempos.length : null;
-
-  const recebido = entregues.reduce((s, d) => s + totalRecebido(d.pagamento_recebido), 0);
-
-  return { total: entregues.length, entreguesHoje: entreguesHoje.length, emAndamento: ativos.length, tempoMedio, recebido };
-}
-
-function AbaEquipe({ entregadores, despachos }: {
-  entregadores: EntregadorRow[];
-  despachos: DespachoFull[];
-}) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const [pinAberto, setPinAberto] = useState<EntregadorRow | null>(null);
-  const [novoAberto, setNovoAberto] = useState(false);
-  const [pin, setPin] = useState(["", "", "", ""]);
-  const [loading, setLoading] = useState(false);
-  const [novoNome, setNovoNome] = useState("");
-  const [novoTel, setNovoTel] = useState("");
-  const [novoPin, setNovoPin] = useState(["", "", "", ""]);
-
-  const pinRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
-  const novoPinRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
-
-  function abrirPin(e: EntregadorRow) {
-    setPinAberto(e);
-    setPin(["", "", "", ""]);
-    setTimeout(() => pinRefs[0].current?.focus(), 100);
-  }
-
-  async function salvarLogin() {
-    if (!pinAberto) return;
-    const pinStr = pin.join("");
-    if (pinStr.length < 4) {
-      toast({ title: "PIN incompleto", variant: "destructive" });
-      return;
-    }
-    setLoading(true);
-    try {
-      const email = `${pinAberto.telefone.replace(/\D/g, "")}@farmaciavital.internal`;
-      const res = await fetch("/api/create-entregador", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password: pinToPassword(pinStr),
-          ...(pinAberto.user_id ? { userId: pinAberto.user_id } : {}),
-        }),
-      });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.msg ?? result.error ?? "Erro na API");
-      if (!pinAberto.user_id) {
-        if (!result.id) throw new Error("user_id não retornado.");
-        const { error } = await externalSupabase
-          .from("entregadores").update({ user_id: result.id }).eq("id", pinAberto.id);
-        if (error) throw new Error(error.message);
-      }
-      toast({ title: pinAberto.user_id ? `PIN redefinido para ${pinAberto.nome}` : `Login criado para ${pinAberto.nome}` });
-      qc.invalidateQueries({ queryKey: ["monitor-entregadores"] });
-      setPinAberto(null);
-    } catch (err: unknown) {
-      toast({
-        title: "Erro ao salvar login",
-        description: err instanceof Error ? err.message : "Erro",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function cadastrar() {
-    if (!novoNome.trim() || !novoTel.trim()) {
-      toast({ title: "Nome e telefone são obrigatórios", variant: "destructive" });
-      return;
-    }
-    setLoading(true);
-    try {
-      const tel = novoTel.replace(/\D/g, "");
-      const { data: inserted, error } = await externalSupabase
-        .from("entregadores")
-        .insert({ nome: novoNome.trim(), telefone: tel, ativo: true })
-        .select()
-        .single();
-      if (error) throw new Error(error.message);
-
-      const pinStr = novoPin.join("");
-      if (pinStr.length === 4 && inserted) {
-        const res = await fetch("/api/create-entregador", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: `${tel}@farmaciavital.internal`,
-            password: pinToPassword(pinStr),
-          }),
-        });
-        const result = await res.json();
-        if (res.ok && result.id) {
-          await externalSupabase.from("entregadores").update({ user_id: result.id }).eq("id", inserted.id);
-        }
-      }
-
-      toast({ title: `${novoNome} cadastrado` });
-      qc.invalidateQueries({ queryKey: ["monitor-entregadores"] });
-      setNovoNome(""); setNovoTel(""); setNovoPin(["", "", "", ""]);
-      setNovoAberto(false);
-    } catch (err: unknown) {
-      toast({
-        title: "Erro ao cadastrar",
-        description: err instanceof Error ? err.message : "Erro",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function alternarAtivo(e: EntregadorRow) {
-    const { error } = await externalSupabase
-      .from("entregadores").update({ ativo: !e.ativo }).eq("id", e.id);
-    if (error) {
-      toast({ title: "Erro ao alterar status", description: error.message, variant: "destructive" });
-      return;
-    }
-    toast({ title: `${e.nome} ${e.ativo ? "desativado" : "ativado"}` });
-    qc.invalidateQueries({ queryKey: ["monitor-entregadores"] });
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => { setNovoNome(""); setNovoTel(""); setNovoPin(["", "", "", ""]); setNovoAberto(true); }}>
-          <UserPlus className="w-4 h-4 mr-1.5" /> Novo entregador
-        </Button>
-      </div>
-
-      {entregadores.length === 0 && (
-        <p className="text-sm text-muted-foreground text-center py-10">Nenhum entregador cadastrado.</p>
-      )}
-
-      {entregadores.map((e) => {
-        const m = metricasDe(e.id, despachos);
-        return (
-          <div key={e.id} className={cn("bg-card border rounded-xl p-4", e.ativo ? "border-border" : "border-border opacity-60")}>
-            <div className="flex items-start gap-3">
-              <div className={cn(
-                "w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
-                m.emAndamento ? "bg-violet-600 text-white" : "bg-primary/10 text-primary"
-              )}>
-                {iniciais(e.nome)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-foreground truncate">{e.nome}</p>
-                  {m.emAndamento > 0 && (
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-200">
-                      {m.emAndamento} na rua
-                    </span>
-                  )}
-                  {!e.ativo && (
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">
-                      Inativo
-                    </span>
-                  )}
-                  {e.user_id
-                    ? <span className="text-[10px] text-green-600 font-medium">● Login ativo</span>
-                    : <span className="text-[10px] text-amber-600 font-medium">● Sem login</span>}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{e.telefone}</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
-              <div className="bg-secondary/60 rounded-lg px-2.5 py-1.5">
-                <p className="text-[10px] text-muted-foreground">Entregues</p>
-                <p className="text-sm font-bold">{m.total}</p>
-              </div>
-              <div className="bg-secondary/60 rounded-lg px-2.5 py-1.5">
-                <p className="text-[10px] text-muted-foreground">Hoje</p>
-                <p className="text-sm font-bold">{m.entreguesHoje}</p>
-              </div>
-              <div className="bg-secondary/60 rounded-lg px-2.5 py-1.5">
-                <p className="text-[10px] text-muted-foreground">Tempo médio</p>
-                <p className="text-sm font-bold">{duracaoCurta(m.tempoMedio)}</p>
-              </div>
-              <div className="bg-secondary/60 rounded-lg px-2.5 py-1.5">
-                <p className="text-[10px] text-muted-foreground">Recebido</p>
-                <p className={cn("text-sm", moneyClass(m.recebido))}>{brl(m.recebido)}</p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2 mt-3">
-              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => abrirPin(e)}>
-                <KeyRound className="w-3.5 h-3.5 mr-1.5" />
-                {e.user_id ? "Redefinir PIN" : "Criar login"}
-              </Button>
-              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => alternarAtivo(e)}>
-                <Power className="w-3.5 h-3.5 mr-1.5" />
-                {e.ativo ? "Desativar" : "Ativar"}
-              </Button>
-              <a
-                href={`https://wa.me/${e.telefone.replace(/\D/g, "")}`}
-                target="_blank" rel="noreferrer"
-                className="inline-flex items-center h-8 px-3 rounded-md text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition-colors"
-              >
-                <Phone className="w-3.5 h-3.5 mr-1.5" /> WhatsApp
-              </a>
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Modal PIN */}
-      <Dialog open={!!pinAberto} onOpenChange={(v) => { if (!v) setPinAberto(null); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{pinAberto?.user_id ? "Redefinir PIN" : "Criar login"}</DialogTitle>
-          </DialogHeader>
-          {pinAberto && (
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-semibold">{pinAberto.nome}</p>
-                <p className="text-xs text-muted-foreground">{pinAberto.telefone}</p>
-              </div>
-              <div className="space-y-1.5">
-                <p className="text-sm font-medium">
-                  {pinAberto.user_id ? "Novo PIN de 4 dígitos" : "Defina um PIN de 4 dígitos"}
-                </p>
-                <PinInput pin={pin} setPin={setPin} pinRefs={pinRefs} />
-              </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" className="flex-1" onClick={() => setPinAberto(null)}>Cancelar</Button>
-                <Button className="flex-1" onClick={salvarLogin} disabled={loading}>
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Salvar"}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal novo entregador */}
-      <Dialog open={novoAberto} onOpenChange={setNovoAberto}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Novo entregador</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="ent-nome">Nome</Label>
-              <Input id="ent-nome" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Nome completo" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ent-tel">Telefone (WhatsApp)</Label>
-              <Input id="ent-tel" value={novoTel} onChange={(e) => setNovoTel(e.target.value)} placeholder="5521900000000" type="tel" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>PIN de acesso (opcional)</Label>
-              <PinInput pin={novoPin} setPin={setNovoPin} pinRefs={novoPinRefs} />
-              <p className="text-xs text-muted-foreground text-center">Pode ser definido depois</p>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={() => setNovoAberto(false)}>Cancelar</Button>
-              <Button className="flex-1" onClick={cadastrar} disabled={loading || !novoNome.trim() || !novoTel.trim()}>
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Cadastrar"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
 // ─── Aba: Histórico ───────────────────────────────────────────────────────────
 
 const PERIODOS = [
@@ -1028,11 +711,15 @@ function AbaHistorico({ despachos, entregadores }: {
 
 // ─── Página ───────────────────────────────────────────────────────────────────
 
-type Aba = "ao_vivo" | "equipe" | "historico";
+/**
+ * Esta página é só MONITORAMENTO. O cadastro (e o login) de quem trabalha aqui
+ * mudou de lugar em 05/08: virou a seção /equipe, com entregadores e balcão
+ * dentro dela — aqui não havia onde criar acesso para quem fica no balcão.
+ */
+type Aba = "ao_vivo" | "historico";
 
 const ABAS: { key: Aba; label: string; icon: React.ReactNode }[] = [
   { key: "ao_vivo", label: "Ao vivo", icon: <Radio className="w-4 h-4" /> },
-  { key: "equipe", label: "Equipe", icon: <Users className="w-4 h-4" /> },
   { key: "historico", label: "Histórico", icon: <History className="w-4 h-4" /> },
 ];
 
@@ -1142,7 +829,6 @@ export default function Entregadores() {
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           {aba === "ao_vivo" && <AbaAoVivo despachos={lista} />}
-          {aba === "equipe" && <AbaEquipe entregadores={equipe} despachos={lista} />}
           {aba === "historico" && <AbaHistorico despachos={lista} entregadores={equipe} />}
         </div>
       </div>
