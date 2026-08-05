@@ -19,6 +19,8 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { useAuth } from "@/lib/auth";
+import CodigoPedido from "@/components/CodigoPedido";
+import EnderecoLink from "@/components/EnderecoLink";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -43,6 +45,8 @@ type DespachoEntrega = {
 
 type PedidoEntrega = {
   id: string;
+  /** Vem no `select("*")`. É por ele que balcão e entregador se referem ao pedido. */
+  codigo: string | null;
   cliente_id: string;
   resumo: string | null;
   status: string;
@@ -52,7 +56,14 @@ type PedidoEntrega = {
   pessoa_recebimento: string | null;
   created_at: string;
   updated_at: string;
-  clientes: { nome: string | null; telefone: string; observacoes: string | null; foto_url: string | null } | null;
+  clientes: {
+    nome: string | null;
+    telefone: string;
+    observacoes: string | null;
+    foto_url: string | null;
+    /** Nota do entregador sobre o cliente — vai no bilhete de toda entrega futura. */
+    anotacoes_entregador: string | null;
+  } | null;
   itens_pedido: { item: string; quantidade: number }[];
   despacho_entrega: DespachoEntrega[];
 };
@@ -70,7 +81,8 @@ async function fetchEntregasEntregador(entregadorId: string): Promise<PedidoEntr
 
   const { data, error } = await externalSupabase
     .from("pedidos")
-    .select("*, clientes(nome, telefone, observacoes, foto_url), itens_pedido(item, quantidade), despacho_entrega(*)")
+    // Precisa ser string literal: concatenada, o Supabase perde a inferência de tipo.
+    .select("*, clientes(nome, telefone, observacoes, foto_url, anotacoes_entregador), itens_pedido(item, quantidade), despacho_entrega(*)")
     .in("id", pedidoIds)
     .not("status", "in", '("retirado")')
     .order("created_at", { ascending: false });
@@ -158,11 +170,117 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   const [pagForma, setPagForma] = useState("Dinheiro");
   const [pagValor, setPagValor] = useState("");
 
+  // ── Notas & Fotos ──────────────────────────────────────────────────────────
+  // Três destinos diferentes, de propósito:
+  //  · observação DESTA entrega  -> despacho_entrega.observacao (morre com o pedido)
+  //  · nota sobre o CLIENTE      -> clientes.anotacoes_entregador (vai no bilhete
+  //    de todo pedido futuro dele — é o campo que o Desp_Montar_Msg já lê)
+  //  · referência do ENDEREÇO    -> enderecos.referencia (idem, por endereço)
+  // Antes só existia o primeiro: tudo que o entregador aprendia na rua ("o portão
+  // é o verde", "tocar no 202") sumia junto com a entrega.
   const [notasOpen, setNotasOpen] = useState(false);
   const [obsText, setObsText] = useState(despacho?.observacao ?? "");
+  const [notaCliente, setNotaCliente] = useState("");
+  const [refEndereco, setRefEndereco] = useState("");
   const [fotosFila, setFotosFila] = useState<File[]>([]);
+  const [fotoNoEndereco, setFotoNoEndereco] = useState(false);
   const [salvandoNotas, setSalvandoNotas] = useState(false);
   const inputFotoRef = useRef<HTMLInputElement>(null);
+
+  // A linha de `enderecos` só é buscada quando o entregador abre as notas —
+  // não vale uma query por card só para o caso de alguém abrir.
+  const { data: enderecoRow } = useQuery({
+    queryKey: ["endereco-do-pedido", pedido.cliente_id, pedido.endereco],
+    queryFn: async () => {
+      const { data } = await externalSupabase
+        .from("enderecos")
+        .select("id, referencia, fotos")
+        .eq("cliente_id", pedido.cliente_id)
+        .eq("label_exibicao", pedido.endereco!)
+        .limit(1);
+      return data?.[0] ?? null;
+    },
+    enabled: notasOpen && !!pedido.endereco && !!pedido.cliente_id,
+  });
+
+  // Recarrega os campos toda vez que o painel abre: outra pessoa (ou o balcão)
+  // pode ter mexido desde a última vez.
+  useEffect(() => {
+    if (!notasOpen) return;
+    setObsText(despacho?.observacao ?? "");
+    setNotaCliente(pedido.clientes?.anotacoes_entregador ?? "");
+  }, [notasOpen]);
+
+  useEffect(() => {
+    if (enderecoRow) setRefEndereco(enderecoRow.referencia ?? "");
+  }, [enderecoRow]);
+
+  /**
+   * Salva os três campos + as fotos. Cada gravação é independente e só acontece
+   * se houve mudança — assim uma nota de cliente não sobrescreve o que outro
+   * entregador escreveu enquanto este card estava aberto sem ser tocado.
+   *
+   * Falha aparece na tela: nota do entregador que some em silêncio é pior do
+   * que nota que nunca existiu, porque ele acha que registrou.
+   */
+  async function salvarNotas() {
+    if (!despacho) return;
+    setSalvandoNotas(true);
+    try {
+      const novasUrls: string[] = [];
+      for (const file of fotosFila) {
+        const ext = file.name.split(".").pop() ?? "jpg";
+        const path = `${despacho.id}/${Date.now()}-${novasUrls.length}.${ext}`;
+        const { error: upErr } = await externalSupabase.storage.from("entregas").upload(path, file);
+        if (upErr) throw upErr;
+        const { data } = externalSupabase.storage.from("entregas").getPublicUrl(path);
+        novasUrls.push(data.publicUrl);
+      }
+
+      const { error: e1 } = await externalSupabase
+        .from("despacho_entrega")
+        .update({ observacao: obsText || null, fotos: [...(despacho.fotos ?? []), ...novasUrls] })
+        .eq("id", despacho.id);
+      if (e1) throw e1;
+
+      if (notaCliente !== (pedido.clientes?.anotacoes_entregador ?? "")) {
+        const { error: e2 } = await externalSupabase
+          .from("clientes")
+          .update({ anotacoes_entregador: notaCliente || null })
+          .eq("id", pedido.cliente_id);
+        if (e2) throw e2;
+      }
+
+      if (enderecoRow) {
+        const mudouRef = refEndereco !== (enderecoRow.referencia ?? "");
+        const guardarFotos = fotoNoEndereco && novasUrls.length > 0;
+        if (mudouRef || guardarFotos) {
+          const patch: Record<string, unknown> = {};
+          if (mudouRef) patch.referencia = refEndereco || null;
+          if (guardarFotos) patch.fotos = [...(enderecoRow.fotos ?? []), ...novasUrls];
+          const { error: e3 } = await externalSupabase
+            .from("enderecos")
+            .update(patch)
+            .eq("id", enderecoRow.id);
+          if (e3) throw e3;
+        }
+      }
+
+      setFotosFila([]);
+      setFotoNoEndereco(false);
+      toast({ title: "Notas salvas!" });
+      qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
+      qc.invalidateQueries({ queryKey: ["endereco-do-pedido"] });
+    } catch (err) {
+      toast({
+        title: "Não deu para salvar",
+        description: err instanceof Error ? err.message : "Tente de novo.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvandoNotas(false);
+    }
+  }
 
   useEffect(() => {
     if (pagamentoOpen) {
@@ -281,9 +399,10 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-semibold text-foreground">{nomeCliente}</p>
+            <CodigoPedido codigo={pedido.codigo} />
             {cancelado && <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">Cancelado</span>}
           </div>
+          <p className="text-sm font-semibold text-foreground">{nomeCliente}</p>
           <p className="text-xs text-muted-foreground">
             {format(new Date(pedido.created_at), "dd/MM/yy 'às' HH:mm", { locale: ptBR })}
           </p>
@@ -305,11 +424,10 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         </div>
       )}
 
-      {/* Endereço */}
+      {/* Endereço — clicável: o entregador precisa do caminho, não do texto */}
       {pedido.endereco && (
-        <div className="flex items-start gap-2 bg-secondary rounded-lg px-3 py-2">
-          <MapPin className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-          <span className="text-sm flex-1">{pedido.endereco}</span>
+        <div className="bg-secondary rounded-lg px-3 py-2">
+          <EnderecoLink endereco={pedido.endereco} linhas={0} className="flex gap-2" />
         </div>
       )}
 
@@ -370,25 +488,94 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
           onClick={() => setNotasOpen(v => !v)}
           className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full">
           <MessageSquare className="w-3.5 h-3.5" />
-          {notasOpen ? "Fechar notas" : `Notas & Fotos${(despacho?.observacao || despacho?.fotos?.length) ? " ✓" : ""}`}
+          {notasOpen
+            ? "Fechar notas"
+            : `Notas & Fotos${
+                despacho?.observacao || despacho?.fotos?.length || pedido.clientes?.anotacoes_entregador
+                  ? " ✓"
+                  : ""
+              }`}
         </button>
         {notasOpen && (
-          <div className="mt-2 space-y-2">
-            <textarea
-              rows={2}
-              placeholder="Observação da entrega..."
-              value={obsText}
-              onChange={e => setObsText(e.target.value)}
-              className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-            {/* Fotos existentes */}
+          <div className="mt-2 space-y-3">
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                Sobre esta entrega
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Ex.: cliente não estava, deixei com o vizinho..."
+                value={obsText}
+                onChange={e => setObsText(e.target.value)}
+                className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <p className="text-[10px] text-muted-foreground">Fica só neste pedido.</p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                Sobre o cliente
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Ex.: tem cachorro solto, chamar do portão..."
+                value={notaCliente}
+                onChange={e => setNotaCliente(e.target.value)}
+                className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Aparece no WhatsApp de <b>todas</b> as próximas entregas deste cliente.
+              </p>
+            </div>
+
+            {pedido.endereco && (
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                  Referência do endereço
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Ex.: portão verde ao lado da padaria, 2º andar..."
+                  value={refEndereco}
+                  onChange={e => setRefEndereco(e.target.value)}
+                  disabled={!enderecoRow}
+                  className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {enderecoRow
+                    ? "Aparece no bilhete de quem for entregar neste endereço."
+                    : "Endereço deste pedido não está cadastrado — só dá para salvar a referência de um endereço cadastrado."}
+                </p>
+              </div>
+            )}
+
+            {/* Fotos já salvas — desta entrega e do local */}
             {(despacho?.fotos?.length ?? 0) > 0 && (
-              <div className="flex gap-2 flex-wrap">
-                {despacho!.fotos!.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noreferrer">
-                    <img src={url} alt={`foto ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-border" />
-                  </a>
-                ))}
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground mb-1">
+                  Fotos desta entrega
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {despacho!.fotos!.map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noreferrer">
+                      <img src={url} alt={`foto ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-border" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(enderecoRow?.fotos?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground mb-1">
+                  Fotos do local (salvas)
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {enderecoRow!.fotos!.map((url: string, i: number) => (
+                    <a key={i} href={url} target="_blank" rel="noreferrer">
+                      <img src={url} alt={`local ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-primary/40" />
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
             {/* Fotos na fila */}
@@ -406,6 +593,18 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
                 ))}
               </div>
             )}
+            {enderecoRow && (
+              <label className="flex items-center gap-2 text-xs text-foreground">
+                <input
+                  type="checkbox"
+                  checked={fotoNoEndereco}
+                  onChange={e => setFotoNoEndereco(e.target.checked)}
+                  className="w-4 h-4 accent-[hsl(var(--primary))]"
+                />
+                Guardar também no endereço (fica para as próximas entregas)
+              </label>
+            )}
+
             <div className="flex gap-2">
               <button
                 onClick={() => inputFotoRef.current?.click()}
@@ -426,29 +625,8 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={salvandoNotas}
-                onClick={async () => {
-                  if (!despacho) return;
-                  setSalvandoNotas(true);
-                  try {
-                    const novasUrls: string[] = [];
-                    for (const file of fotosFila) {
-                      const ext = file.name.split(".").pop() ?? "jpg";
-                      const path = `${despacho.id}/${Date.now()}.${ext}`;
-                      const { error: upErr } = await externalSupabase.storage.from("entregas").upload(path, file);
-                      if (!upErr) {
-                        const { data } = externalSupabase.storage.from("entregas").getPublicUrl(path);
-                        novasUrls.push(data.publicUrl);
-                      }
-                    }
-                    const fotosAtuais = despacho.fotos ?? [];
-                    await externalSupabase.from("despacho_entrega")
-                      .update({ observacao: obsText || null, fotos: [...fotosAtuais, ...novasUrls] })
-                      .eq("id", despacho.id);
-                    setFotosFila([]);
-                    qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
-                  } finally { setSalvandoNotas(false); }
-                }}>
+                disabled={salvandoNotas || !despacho}
+                onClick={salvarNotas}>
                 {salvandoNotas ? <Loader2 className="w-3 h-3 animate-spin" /> : "Salvar"}
               </Button>
             </div>

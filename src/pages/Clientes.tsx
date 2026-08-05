@@ -18,6 +18,7 @@ import { externalSupabase } from "@/integrations/supabase/external-client";
 import { brl } from "@/lib/status";
 import { fotoWhatsApp } from "@/lib/pedido";
 import FichaPedidoPorId from "@/components/FichaPedidoPorId";
+import EnderecoLink from "@/components/EnderecoLink";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -225,9 +226,7 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
 
         <div className="space-y-2 mb-4">
           {allEnd.map((end, i) => (
-            <div key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-              <MapPin className="w-4 h-4 shrink-0 mt-0.5" /><span>{end}</span>
-            </div>
+            <EnderecoLink key={i} endereco={end} linhas={0} className="flex gap-2" />
           ))}
           {enderecosGPS?.map((e) => (
             <a key={e.id}

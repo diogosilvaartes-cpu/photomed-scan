@@ -180,7 +180,12 @@ export function fichaTexto(p: Pedido, entregadorNome?: string | null): string {
   const valor = p.valor_total != null ? formatCurrency(p.valor_total) : "—";
   linhas.push(`💰 *Total: ${valor}*  •  💳 ${p.pagamento ?? "a combinar"}`);
   linhas.push("");
-  linhas.push(`📄 Ficha completa: ${window.location.origin}/pedido/${pedidoNumero(p)}`);
+  // Antes ia o link da ficha de UM pedido (`/pedido/<codigo>`). O entregador
+  // costuma sair com mais de uma entrega, e a ficha isolada não mostra as outras
+  // nem os botões de "saiu / cheguei / entreguei". `/entregas` é a tela de
+  // trabalho dele: todas as entregas do dia, com as ações. Mudar aqui exige
+  // mudar também no `Desp_Montar_Msg` do workflow Despacho_Motoboy.
+  linhas.push(`🛵 Suas entregas: ${window.location.origin}/entregas`);
   if (p.pix_link) linhas.push(`🔗 PIX: ${p.pix_link}`);
   if (entregadorNome) linhas.push(`🛵 Entregador: ${entregadorNome}`);
 

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import {
-  Loader2, RefreshCw, Phone, MapPin, CreditCard, Package, ChevronRight, X, Clock,
-  Truck, Navigation, LocateFixed, CheckCircle, Eye, FileText, History, Plus, AlarmClock,
+  Loader2, RefreshCw, Phone, CreditCard, Package, ChevronRight, X, Clock,
+  Truck, Navigation, LocateFixed, CheckCircle, Eye, FileText, History, Plus, AlarmClock, Search,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -22,15 +23,198 @@ import { cn } from "@/lib/utils";
 import { STATUS, statusConfig, brl, moneyClass } from "@/lib/status";
 import FichaPedido from "@/components/FichaPedido";
 import NovoPedidoModal from "@/components/NovoPedidoModal";
+import CodigoPedido from "@/components/CodigoPedido";
+import EnderecoLink from "@/components/EnderecoLink";
 import AgendadosLista, {
   type PedidoAgendado, AGENDADO_SELECT, AGENDADO_PENDENTES,
 } from "@/components/AgendadosLista";
 import {
   type Pedido, type EntregadorFull,
-  PEDIDO_SELECT, fichaTexto, formatPhone, formatCurrency, timeAgo, isCoords, mapsLink, pedidoNumero,
+  PEDIDO_SELECT, formatPhone, formatCurrency, timeAgo, pedidoNumero,
 } from "@/lib/pedido";
-import { format } from "date-fns";
+import { format, addDays, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
+
+// ─── Busca e filtro de data ───────────────────────────────────────────────────
+
+/** `yyyy-MM-dd` no fuso do navegador — o balcão pensa no dia dele, não em UTC. */
+const diaDe = (iso: string | null | undefined) =>
+  iso ? format(new Date(iso), "yyyy-MM-dd") : null;
+
+/**
+ * Texto que a busca varre em um pedido. Junta tudo num campo só porque o balcão
+ * procura por qualquer coisa que lembre — "04ago", "dipirona", "Mario Castanho",
+ * o final do telefone — e não por um campo específico.
+ */
+function textoBusca(p: Pedido): string {
+  return [
+    p.codigo,
+    p.clientes?.nome,
+    p.clientes?.telefone,
+    p.endereco,
+    p.pagamento,
+    p.resumo,
+    p.pessoa_recebimento,
+    ...(p.itens_pedido ?? []).map((i) => i.item),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function textoBuscaAgendado(a: PedidoAgendado): string {
+  const itens = Array.isArray(a.itens) ? a.itens : [];
+  return [a.codigo, a.nome_cliente, a.telefone, a.endereco, a.pagamento, a.resumo, ...itens.map((i) => i.name)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+/** Normaliza acento para "jose" achar "José" e vice-versa. */
+const semAcento = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+function casaBusca(alvo: string, termo: string) {
+  const t = semAcento(termo.trim().toLowerCase());
+  if (!t) return true;
+  const a = semAcento(alvo);
+  // Todos os pedaços precisam bater: "mario dipirona" acha o pedido do Mario com dipirona.
+  return t.split(/\s+/).every((parte) => a.includes(parte));
+}
+
+/** Rótulo humano de um dia: "Hoje", "Ontem" ou "qua, 05/08". */
+export function rotuloDia(iso: string, hojeStr = format(new Date(), "yyyy-MM-dd")) {
+  const ontemStr = format(addDays(new Date(hojeStr + "T12:00:00"), -1), "yyyy-MM-dd");
+  if (iso === hojeStr) return "Hoje";
+  if (iso === ontemStr) return "Ontem";
+  const d = new Date(iso + "T12:00:00");
+  return `${format(d, "EEEE", { locale: ptBR })}, ${format(d, "dd/MM")}`;
+}
+
+/**
+ * Filtro de dia: **os últimos 7 dias, rolando**.
+ *
+ * A primeira versão mostrava a semana corrente (segunda até hoje) e numa
+ * quarta-feira sumiam sexta, sábado e domingo — justo os dias que o balcão mais
+ * procura de manhã. Rolando, os sete dias da semana estão SEMPRE lá, e nenhum
+ * chip volta vazio por ser futuro.
+ *
+ * Para além disso, o seletor de data nativo: um dia específico é raro o
+ * suficiente para não merecer chip, e no celular ele abre o calendário do
+ * sistema, que o balcão já sabe usar.
+ */
+function FiltroData({
+  dia,
+  onChange,
+  contar,
+}: {
+  dia: string | null;
+  onChange: (d: string | null) => void;
+  contar: (d: string | null) => number;
+}) {
+  const hoje = startOfDay(new Date());
+  const hojeStr = format(hoje, "yyyy-MM-dd");
+
+  // Hoje primeiro, andando para trás: é a ordem em que o balcão procura.
+  const dias = Array.from({ length: 7 }, (_, i) => addDays(hoje, -i)).map((d) => ({
+    valor: format(d, "yyyy-MM-dd"),
+    // "Hoje"/"Ontem" ganham do nome do dia — ninguém pensa "terça" para ontem.
+    rotulo:
+      i0(d, hoje) === 0 ? "Hoje"
+        : i0(d, hoje) === 1 ? "Ontem"
+          : `${format(d, "EEE", { locale: ptBR }).replace(".", "")} ${format(d, "dd")}`,
+  }));
+
+  // Dia escolhido no calendário que não está entre os 7 chips: vira um chip extra
+  // no fim, senão o filtro fica ativo sem nada aceso na tela.
+  const fora = dia && !dias.some((d) => d.valor === dia) ? dia : null;
+
+  const Chip = ({
+    ativo,
+    onClick,
+    children,
+  }: {
+    ativo: boolean;
+    onClick: () => void;
+    children: React.ReactNode;
+  }) => (
+    <button
+      onClick={onClick}
+      className={cn(
+        "shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors capitalize",
+        ativo
+          ? "bg-primary text-primary-foreground border-transparent"
+          : "bg-background text-muted-foreground border-border hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+      <Chip ativo={dia === null} onClick={() => onChange(null)}>
+        Tudo <span className="opacity-70">{contar(null)}</span>
+      </Chip>
+      <span className="shrink-0 w-px self-stretch bg-border my-1" aria-hidden />
+      {dias.map((d) => (
+        <Chip key={d.valor} ativo={dia === d.valor} onClick={() => onChange(d.valor)}>
+          {d.rotulo}
+          <span className="ml-1 opacity-70">{contar(d.valor)}</span>
+        </Chip>
+      ))}
+      {fora && (
+        <Chip ativo onClick={() => onChange(null)}>
+          {format(new Date(fora + "T12:00:00"), "dd/MM")}
+          <span className="ml-1 opacity-70">{contar(fora)}</span>
+        </Chip>
+      )}
+      {/* Input nativo, e não um calendário nosso: no celular ele abre o
+          seletor do sistema, que o balcão já sabe usar. */}
+      <label
+        title="Escolher outra data"
+        className="shrink-0 flex items-center gap-1 h-[30px] pl-2.5 pr-1.5 rounded-full border border-border bg-background text-xs font-bold text-muted-foreground focus-within:text-foreground"
+      >
+        <CalendarDays className="w-3.5 h-3.5 shrink-0" />
+        <input
+          type="date"
+          value={dia ?? ""}
+          max={hojeStr}
+          onChange={(e) => onChange(e.target.value || null)}
+          className="w-[112px] bg-transparent text-xs font-bold focus:outline-none"
+        />
+      </label>
+    </div>
+  );
+}
+
+/** Diferença em dias inteiros entre duas datas já normalizadas ao início do dia. */
+function i0(a: Date, b: Date) {
+  return Math.round((startOfDay(b).getTime() - startOfDay(a).getTime()) / 86400000);
+}
+
+/**
+ * Agrupa por dia, do mais recente para o mais antigo.
+ *
+ * A lista já vem ordenada por `created_at desc` do banco, então basta quebrar
+ * quando o dia muda — não precisa reordenar nem estabilizar nada.
+ */
+function porDia(lista: Pedido[]): [string, Pedido[]][] {
+  const grupos: [string, Pedido[]][] = [];
+  for (const p of lista) {
+    const d = diaDe(p.created_at) ?? "sem-data";
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo[0] === d) ultimo[1].push(p);
+    else grupos.push([d, [p]]);
+  }
+  return grupos;
+}
+
+/** Cancelado não conta no total do dia — não entrou dinheiro. */
+function totalDoDia(lista: Pedido[]) {
+  return lista
+    .filter((p) => p.status !== "cancelado")
+    .reduce((s, p) => s + (p.valor_total ?? 0), 0);
+}
 
 // ─── Kanban config ────────────────────────────────────────────────────────────
 
@@ -145,14 +329,20 @@ function DespacharModal({
         }
       }
 
-      // Atualiza status + valor_total do pedido
-      const pedidoUpdate: Record<string, unknown> = { status: "saiu_para_entrega" };
-      if (valorTotal && !pedido.valor_total) pedidoUpdate.valor_total = valorTotal;
-      const { error: errPedido } = await externalSupabase
-        .from("pedidos")
-        .update(pedidoUpdate)
-        .eq("id", pedido.id);
-      if (errPedido) throw new Error(errPedido.message);
+      // O status NÃO é mexido aqui de propósito.
+      // Escolher o entregador deixou de significar "saiu para entrega" na reforma
+      // de 03/08 — quem move o pedido para `saiu_para_entrega` é o próprio
+      // entregador, pelo botão do WhatsApp (WF5) ou pelo painel dele. O painel
+      // continuava pulando essa etapa e fechando a rua sozinho: o cliente recebia
+      // "saiu para entrega" antes de alguém sair, e o `saiu_em` do despacho ficava
+      // nulo. Quem põe o pedido em `em_separacao` é o `Desp_UpdateStatus` do n8n.
+      if (valorTotal && !pedido.valor_total) {
+        const { error: errPedido } = await externalSupabase
+          .from("pedidos")
+          .update({ valor_total: valorTotal })
+          .eq("id", pedido.id);
+        if (errPedido) throw new Error(errPedido.message);
+      }
 
       // Decrementar estoque
       if (pedido.itens_pedido?.length) {
@@ -187,47 +377,43 @@ function DespacharModal({
           });
         }
 
-        // Notifica o entregador com a ficha COMPLETA.
-        // Antes montava aqui uma versão curta própria, sem código do pedido, wa.me do
-        // cliente, link do Maps, obs de entrega, pessoa que recebe, nota interna nem link
-        // da ficha — enquanto o n8n (Desp_Montar_Msg) mandava tudo. O entregador recebia
-        // mensagens diferentes conforme quem despachasse.
-        // `fichaTexto()` é a fonte única (mesma do botão "Copiar ficha do entregador").
-        const entregador = entregadores.find((e) => e.id === selectedId);
-        // valorTotal pode ter acabado de ser calculado acima e ainda não estar no objeto.
-        const pedidoFicha: Pedido = { ...pedido, valor_total: valorTotal ?? pedido.valor_total };
-        // Só o entregador é avisado aqui. O cliente é avisado quando o
-        // entregador de fato sai (botão no painel dele ou no WhatsApp) — mesma
-        // regra que o n8n segue desde 03/08.
-        if (entregador?.telefone) {
-          try {
-            const r = await fetch("/api/notify-client", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                phone: entregador.telefone.replace(/\D/g, ""),
-                message: fichaTexto(pedidoFicha, entregador.nome),
-              }),
-            });
-            if (!r.ok) {
-              // 500 aqui = ZAPI_INSTANCE/TOKEN/CLIENT_TOKEN faltando na Vercel.
-              // Sem o status na tela, "não chegou" e "não configurado" são indistinguíveis.
-              const d = await r.json().catch(() => ({}));
-              throw new Error(`${r.status}${d?.error ? ` — ${d.error}` : ""}`);
-            }
-          } catch (e) {
-            toast({
-              title: "Entregador não foi avisado",
-              description: `O despacho foi salvo, mas o WhatsApp não saiu (${
-                e instanceof Error ? e.message : "erro"
-              }). Chame o entregador.`,
-              variant: "destructive",
-            });
+        // Aciona o MESMO workflow que o grupo Balcão aciona (Despacho_Motoboy).
+        //
+        // Antes o painel mandava a ficha por `send-text`, e texto puro não tem
+        // botão: o motoboy despachado pelo painel recebia um bilhete sem os
+        // botões "Sair para entrega → Cheguei → Entreguei" que o WF5 alimenta,
+        // enquanto o despachado pelo grupo recebia. Mesma mensagem, mesmo botão,
+        // mesma cadeia de status — a montagem continua morando só no n8n
+        // (`Desp_Montar_Msg`), e `fichaTexto()` no painel é o espelho dela para
+        // o botão "Copiar ficha".
+        //
+        // Só o entregador é avisado aqui. O cliente é avisado quando o entregador
+        // de fato sai — regra de 03/08.
+        try {
+          const r = await fetch("/api/despachar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pedido_id: pedido.id, entregador_id: selectedId }),
+          });
+          if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(`${r.status}${d?.error ? ` — ${d.error}` : ""}`);
           }
+        } catch (e) {
+          toast({
+            title: "Entregador não foi avisado",
+            description: `O despacho foi salvo, mas o WhatsApp não saiu (${
+              e instanceof Error ? e.message : "erro"
+            }). Chame o entregador.`,
+            variant: "destructive",
+          });
         }
       }
 
-      toast({ title: "Pedido despachado!" });
+      toast({
+        title: "Entregador acionado!",
+        description: "Recebeu a ficha e os botões no WhatsApp. O pedido vai para a rua quando ele tocar em “Sair para entrega”.",
+      });
       onDone();
       onClose();
 
@@ -269,7 +455,10 @@ function DespacharModal({
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{despachoExistenteInicial ? "Mudar entregador" : "Despachar pedido"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2 flex-wrap">
+            {despachoExistenteInicial ? "Mudar entregador" : "Despachar pedido"}
+            <CodigoPedido codigo={pedidoNumero(pedido)} />
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
@@ -277,7 +466,7 @@ function DespacharModal({
           </p>
           {pedido.endereco && (
             <p className="text-sm text-muted-foreground">
-              Endereço: <span className="font-medium text-foreground">{pedido.endereco}</span>
+              Endereço: <EnderecoLink endereco={pedido.endereco} icone={false} linhas={0} />
             </p>
           )}
           {pedido.itens_pedido?.filter(i => i.item).length > 0 && (
@@ -350,9 +539,6 @@ function OrderCard({
   const entregadorNome = despacho?.entregador_id
     ? entregadores.find((e) => e.id === despacho.entregador_id)?.nome ?? null
     : null;
-  const enderecoLink = p.endereco ? mapsLink(p.endereco) : null;
-  const enderecoIsCoords = p.endereco ? isCoords(p.endereco) : false;
-
   const [updating, setUpdating] = useState(false);
   // Cancelar é irreversível pela tela e o botão fica colado no "avançar status":
   // sem esta confirmação, um toque errado tirava o pedido da fila sem aviso nenhum.
@@ -395,7 +581,7 @@ function OrderCard({
         <div className="flex items-start justify-between gap-2 mb-1.5">
           <div className="min-w-0">
             <p className="text-lg font-bold text-foreground leading-tight">{nome}</p>
-            <span className="text-[11px] font-mono text-muted-foreground">{pedidoNumero(p)}</span>
+            <CodigoPedido codigo={pedidoNumero(p)} className="block leading-tight" />
           </div>
           <div className="flex items-center gap-1.5 shrink-0 mt-1">
             {p.created_at && (
@@ -444,13 +630,7 @@ function OrderCard({
 
       {/* Endereço + valor */}
       <div className="px-4 py-3 space-y-2">
-        {p.endereco && enderecoLink && (
-          <a href={enderecoLink} target="_blank" rel="noreferrer" onClick={pararPropagacao}
-            className="flex items-start gap-2 text-sm text-status-ink-novo hover:underline">
-            <MapPin className="w-4 h-4 mt-0.5 shrink-0" />
-            <span className="line-clamp-2">{enderecoIsCoords ? "Ver no Maps" : p.endereco}</span>
-          </a>
-        )}
+        <EnderecoLink endereco={p.endereco} className="flex gap-2" />
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <CreditCard className="w-4 h-4" />
@@ -587,7 +767,6 @@ function NaRuaCard({
   const entregador = despacho?.entregador_id
     ? entregadores.find((e) => e.id === despacho.entregador_id)
     : null;
-  const enderecoLink = p.endereco ? mapsLink(p.endereco) : null;
   const locLink = despacho?.localizacao ? `https://maps.google.com/?q=${despacho.localizacao}` : null;
 
   const [confirming, setConfirming] = useState(false);
@@ -620,7 +799,7 @@ function NaRuaCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="text-lg font-bold text-foreground">{nome}</p>
-            <span className="text-[11px] font-mono text-muted-foreground">{pedidoNumero(p)}</span>
+            <CodigoPedido codigo={pedidoNumero(p)} className="block leading-tight" />
           </div>
           <div className="flex items-center gap-1.5 mt-1 shrink-0">
             {p.created_at && (
@@ -663,18 +842,7 @@ function NaRuaCard({
         )}
 
         {/* Endereço */}
-        {p.endereco && (
-          <a
-            href={enderecoLink ?? "#"}
-            target="_blank"
-            rel="noreferrer"
-            onClick={pararPropagacao}
-            className="flex items-start gap-2 text-sm text-status-ink-novo hover:underline"
-          >
-            <MapPin className="w-4 h-4 mt-0.5 shrink-0" />
-            <span className="line-clamp-2">{isCoords(p.endereco) ? "Ver no Maps" : p.endereco}</span>
-          </a>
-        )}
+        <EnderecoLink endereco={p.endereco} className="flex gap-2" />
 
         {/* Localização GPS */}
         {locLink && (
@@ -764,6 +932,12 @@ export default function Pedidos() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filtros, setFiltros] = useState<string[]>(STATUS_ATIVOS_DEFAULT);
+  // Busca e dia valem para as quatro abas: é a mesma fila vista de ângulos
+  // diferentes, e trocar de aba perdendo o que se estava procurando irrita.
+  // `dia = null` significa "todos os dias" — é o padrão, senão o balcão abre a
+  // tela achando que sumiram os pedidos de ontem que ainda estão na rua.
+  const [busca, setBusca] = useState("");
+  const [dia, setDia] = useState<string | null>(null);
   const [aba, setAba] = useState<"kanban" | "na_rua" | "agendados" | "historico">("kanban");
   const [agendados, setAgendados] = useState<PedidoAgendado[]>([]);
   const [despacharPedido, setDespacharPedido] = useState<Pedido | null>(null);
@@ -856,6 +1030,39 @@ export default function Pedidos() {
     }
   }
 
+  /**
+   * Libera o agendado para o cliente confirmar.
+   *
+   * Só marca `liberado_em`. Quem monta e envia os botões é o
+   * WF_Agendamento_Liberar (checa estoque, desvia para revisão manual quando
+   * falta item, manda o option-list e grava `confirmacao_enviada_em`) — o painel
+   * escrever a mensagem aqui seria a quarta cópia de regra do n8n neste arquivo.
+   *
+   * Custo aceito: o envio sai no próximo tique de 5 min. O card avisa isso na
+   * tela para ninguém clicar duas vezes achando que falhou.
+   */
+  async function liberarAgendado(a: PedidoAgendado) {
+    const agora = new Date().toISOString();
+    const { error } = await externalSupabase
+      .from("pedidos_agendados")
+      .update({ liberado_em: agora })
+      .eq("id", a.id);
+
+    if (error) {
+      toast({
+        title: "Não deu para liberar",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setAgendados((prev) => prev.map((x) => (x.id === a.id ? { ...x, liberado_em: agora } : x)));
+    toast({
+      title: "Liberado para o cliente",
+      description: "Ele recebe os botões de confirmar/cancelar no WhatsApp em até 5 minutos.",
+    });
+  }
+
   async function handleStatusChange(id: string, newStatus: string) {
     // O card do Kanban também tem "Confirmar Entrega" (NEXT_NORMAL.saiu_para_entrega).
     // Sem este desvio ele fechava o pedido por fora: sem avisar o cliente e sem baixar
@@ -892,9 +1099,25 @@ export default function Pedidos() {
     return () => clearInterval(interval);
   }, []);
 
-  const byStatus = (status: string) => pedidos.filter((p) => p.status === status);
-  const naRua = pedidos.filter((p) => p.status === "saiu_para_entrega");
-  // Só os vivos entram no badge: encerrado (confirmado/cancelado/expirado) é histórico.
+  // Busca + dia aplicados uma vez; todas as abas leem daqui.
+  const visiveis = pedidos.filter(
+    (p) => (dia === null || diaDe(p.created_at) === dia) && casaBusca(textoBusca(p), busca),
+  );
+  const agendadosVisiveis = agendados.filter(
+    (a) => (dia === null || diaDe(a.created_at) === dia) && casaBusca(textoBuscaAgendado(a), busca),
+  );
+  const filtrando = busca.trim() !== "" || dia !== null;
+
+  /** Contagem por dia para os chips — respeita a busca, ignora o dia selecionado. */
+  const contarNoDia = (d: string | null) =>
+    pedidos.filter(
+      (p) => (d === null || diaDe(p.created_at) === d) && casaBusca(textoBusca(p), busca),
+    ).length;
+
+  const byStatus = (status: string) => visiveis.filter((p) => p.status === status);
+  const naRua = visiveis.filter((p) => p.status === "saiu_para_entrega");
+  // Só os vivos entram no badge, e sobre a lista INTEIRA: o badge é alerta de
+  // trabalho parado, não pode sumir só porque o balcão filtrou por "hoje".
   const agendadosPendentes = agendados.filter((a) => AGENDADO_PENDENTES.includes(a.status)).length;
   // Cards e ficha usam a lista toda (pedido antigo pode ter entregador já desativado);
   // só o despacho oferece exclusivamente quem está ativo.
@@ -1002,6 +1225,41 @@ export default function Pedidos() {
             Histórico
           </button>
         </div>
+
+        {/* Busca + dia — valem para todas as abas */}
+        <div className="mt-3 space-y-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <input
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar por código, cliente, telefone, endereço ou item..."
+              className="w-full h-10 pl-9 pr-9 rounded-xl border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+            {busca && (
+              <button
+                onClick={() => setBusca("")}
+                aria-label="Limpar busca"
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-full text-muted-foreground hover:bg-secondary"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          <FiltroData dia={dia} onChange={setDia} contar={contarNoDia} />
+
+          {/* Sem este aviso, um filtro esquecido vira "sumiram os pedidos". */}
+          {filtrando && (
+            <button
+              onClick={() => { setBusca(""); setDia(null); }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+            >
+              <X className="w-3.5 h-3.5" />
+              Limpar filtros — mostrando {visiveis.length} de {pedidos.length} pedidos
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── ABA KANBAN ── */}
@@ -1070,7 +1328,9 @@ export default function Pedidos() {
           {naRua.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
               <Truck className="w-10 h-10 opacity-30" />
-              <p className="text-sm">Nenhum pedido em trânsito agora</p>
+              <p className="text-sm">
+                {filtrando ? "Nenhum pedido em trânsito com esses filtros" : "Nenhum pedido em trânsito agora"}
+              </p>
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -1096,23 +1356,41 @@ export default function Pedidos() {
       {aba === "agendados" && (
         <div className="flex-1 overflow-y-auto">
           <AgendadosLista
-            agendados={agendados}
+            agendados={agendadosVisiveis}
             onAbrirPedido={(id) => { setFichaId(id); setAba("kanban"); }}
             onConfirmar={readOnly ? undefined : confirmarAgendado}
+            onLiberar={readOnly ? undefined : liberarAgendado}
           />
         </div>
       )}
 
       {aba === "historico" && (
         <div className="flex-1 overflow-y-auto p-4">
-          {pedidos.length === 0 ? (
+          {visiveis.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
               <History className="w-10 h-10 opacity-30" />
-              <p className="text-sm">Nenhum pedido registrado</p>
+              <p className="text-sm">
+                {filtrando ? "Nenhum pedido com esses filtros" : "Nenhum pedido registrado"}
+              </p>
             </div>
           ) : (
-            <div className="space-y-2 max-w-3xl mx-auto">
-              {pedidos.map((p) => {
+            <div className="space-y-5 max-w-3xl mx-auto">
+              {porDia(visiveis).map(([diaIso, doDia]) => (
+                <section key={diaIso}>
+                  {/* Cabeçalho grudento: rolando uma lista longa, o balcão perde
+                      a noção de qual dia está olhando. */}
+                  <div className="sticky top-0 z-10 -mx-1 px-1 py-1.5 bg-background/95 backdrop-blur flex items-baseline justify-between gap-3">
+                    <h2 className="text-sm font-extrabold text-foreground capitalize">
+                      {rotuloDia(diaIso)}
+                    </h2>
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      {doDia.length} {doDia.length === 1 ? "pedido" : "pedidos"} ·{" "}
+                      <span className={moneyClass(totalDoDia(doDia))}>{brl(totalDoDia(doDia))}</span>
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 mt-1.5">
+              {doDia.map((p) => {
                 const cfg = statusConfig(p.status);
                 return (
                   <button
@@ -1124,12 +1402,16 @@ export default function Pedidos() {
                       <cfg.Icon className="w-4 h-4" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">
-                        {p.clientes?.nome ?? p.clientes?.telefone ?? "—"}
-                      </p>
+                      <div className="flex items-baseline gap-2 min-w-0">
+                        <CodigoPedido codigo={pedidoNumero(p)} tamanho="sm" className="shrink-0" />
+                        <p className="text-sm font-semibold text-foreground truncate">
+                          {p.clientes?.nome ?? p.clientes?.telefone ?? "—"}
+                        </p>
+                      </div>
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                         <Clock className="w-3 h-3" />
-                        {p.created_at ? format(new Date(p.created_at), "dd/MM HH:mm", { locale: ptBR }) : "—"}
+                        {/* Só a hora: o dia já está no cabeçalho do grupo. */}
+                        {p.created_at ? format(new Date(p.created_at), "HH:mm", { locale: ptBR }) : "—"}
                       </p>
                     </div>
                     <div className="text-right shrink-0 space-y-1">
@@ -1143,6 +1425,9 @@ export default function Pedidos() {
                   </button>
                 );
               })}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </div>

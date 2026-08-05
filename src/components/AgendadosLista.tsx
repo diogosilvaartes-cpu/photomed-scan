@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { AlarmClock, AlertTriangle, Ban, CheckCircle2, Clock, Loader2, MessageCircle, Timer } from "lucide-react";
+import { AlarmClock, AlertTriangle, Ban, CheckCircle2, Clock, Loader2, MessageCircle, Send, Timer } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { brl, moneyClass } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import CodigoPedido from "@/components/CodigoPedido";
+import EnderecoLink from "@/components/EnderecoLink";
 
 /**
  * Pedidos agendados — os que o cliente montou com a farmácia fechada e ainda não viraram
@@ -37,6 +39,8 @@ export type PedidoAgendado = {
   motivo: string | null;
   pedido_id: string | null;
   abre_em: string | null;
+  /** Quando o balcão liberou para o cliente confirmar. NULL = o n8n ignora. */
+  liberado_em: string | null;
   confirmacao_enviada_em: string | null;
   respondido_em: string | null;
   created_at: string;
@@ -44,7 +48,7 @@ export type PedidoAgendado = {
 
 export const AGENDADO_SELECT =
   "id,codigo,cliente_id,telefone,nome_cliente,itens,resumo,tipo_fulfillment,endereco," +
-  "pagamento,valor_total,status,motivo,pedido_id,abre_em,confirmacao_enviada_em,respondido_em,created_at";
+  "pagamento,valor_total,status,motivo,pedido_id,abre_em,liberado_em,confirmacao_enviada_em,respondido_em,created_at";
 
 /** Ainda vivos: é o que o balcão precisa acompanhar. O resto é histórico. */
 export const AGENDADO_PENDENTES = ["aguardando_abertura", "aguardando_confirmacao", "revisao_manual"];
@@ -53,11 +57,11 @@ type Cfg = { label: string; Icon: typeof Clock; chip: string; faixa: string; aju
 
 const CFG: Record<string, Cfg> = {
   aguardando_abertura: {
-    label: "Aguardando abertura",
+    label: "Represado",
     Icon: AlarmClock,
     chip: "bg-status-separacao/10 text-status-ink-separacao border border-status-separacao/30",
     faixa: "bg-status-separacao",
-    ajuda: "Na fila. Quando a farmácia abrir, a Ana chama o cliente para confirmar.",
+    ajuda: "Na fila. O cliente só é chamado quando o balcão liberar.",
   },
   aguardando_confirmacao: {
     label: "Esperando o cliente",
@@ -121,17 +125,25 @@ function Card({
   a,
   onAbrirPedido,
   onConfirmar,
+  onLiberar,
 }: {
   a: PedidoAgendado;
   onAbrirPedido?: (id: string) => void;
   onConfirmar?: (a: PedidoAgendado) => Promise<void>;
+  onLiberar?: (a: PedidoAgendado) => Promise<void>;
 }) {
   const cfg = cfgDe(a.status);
   const itens = itensDe(a);
   const tel = (a.telefone || "").replace(/\D/g, "");
   const [perguntando, setPerguntando] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
+  const [liberando, setLiberando] = useState(false);
   const podeConfirmar = !!onConfirmar && AGENDADO_PENDENTES.includes(a.status);
+  // Liberar é o passo ANTES de confirmar: manda os botões ao cliente e deixa
+  // ele decidir. Só faz sentido enquanto ninguém foi chamado ainda.
+  const podeLiberar =
+    !!onLiberar && !a.liberado_em && ["aguardando_abertura", "aguardando_entrega"].includes(a.status);
+  const esperandoEnvio = !!a.liberado_em && !a.confirmacao_enviada_em && a.status !== "confirmado";
 
   async function confirmar() {
     setConfirmando(true);
@@ -139,6 +151,15 @@ function Card({
       await onConfirmar!(a);
     } finally {
       setConfirmando(false);
+    }
+  }
+
+  async function liberar() {
+    setLiberando(true);
+    try {
+      await onLiberar!(a);
+    } finally {
+      setLiberando(false);
     }
   }
 
@@ -150,9 +171,7 @@ function Card({
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              {a.codigo && (
-                <span className="font-mono text-sm font-bold text-foreground">{a.codigo}</span>
-              )}
+              <CodigoPedido codigo={a.codigo} />
               <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold", cfg.chip)}>
                 <cfg.Icon className="w-3.5 h-3.5 shrink-0" />
                 {cfg.label}
@@ -175,10 +194,18 @@ function Card({
           ))}
         </ul>
 
-        <p className="text-xs text-muted-foreground">
-          {a.tipo_fulfillment === "retirada" ? "🏪 Retirada na loja" : `🚚 ${a.endereco || "sem endereço"}`}
+        <div className="text-xs text-muted-foreground">
+          {a.tipo_fulfillment === "retirada" ? (
+            <span>🏪 Retirada na loja</span>
+          ) : a.endereco ? (
+            <span className="inline-flex items-start gap-1">
+              🚚 <EnderecoLink endereco={a.endereco} icone={false} className="text-xs" />
+            </span>
+          ) : (
+            <span>🚚 sem endereço</span>
+          )}
           {a.pagamento ? ` · 💳 ${a.pagamento}` : ""}
-        </p>
+        </div>
 
         {a.motivo && (
           <p className="mt-2 text-xs font-semibold text-status-ink-cancelado">{a.motivo}</p>
@@ -186,9 +213,20 @@ function Card({
 
         <p className="mt-2 text-[11px] text-muted-foreground">
           Agendado {hora(a.created_at)}
+          {a.liberado_em ? ` · liberado ${hora(a.liberado_em)}` : ""}
           {a.confirmacao_enviada_em ? ` · avisado ${hora(a.confirmacao_enviada_em)}` : ""}
           {a.respondido_em ? ` · respondeu ${hora(a.respondido_em)}` : ""}
         </p>
+
+        {/* Liberou mas o cliente ainda não recebeu: quem envia é o
+            WF_Agendamento_Liberar, no tique de 5 min. Sem este aviso o balcão
+            clica de novo achando que não funcionou. */}
+        {esperandoEnvio && (
+          <p className="mt-2 flex items-start gap-1.5 text-[11px] font-semibold text-status-ink-separacao bg-status-separacao/10 border border-status-separacao/25 rounded-lg px-2.5 py-1.5">
+            <Timer className="w-3.5 h-3.5 shrink-0 mt-px" />
+            Liberado. O cliente recebe os botões no WhatsApp em até 5 minutos.
+          </p>
+        )}
 
         <div className="mt-3 flex items-center gap-2 flex-wrap">
           {tel && (
@@ -211,18 +249,36 @@ function Card({
             </button>
           )}
 
+          {podeLiberar && (
+            <button
+              onClick={liberar}
+              disabled={liberando}
+              title="Manda os botões CONFIRMAR / CANCELAR no WhatsApp do cliente"
+              className={cn(
+                "inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-colors",
+                liberando && "opacity-60 cursor-not-allowed",
+              )}
+            >
+              {liberando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Pedir confirmação
+            </button>
+          )}
+
           {podeConfirmar && (
             <>
               <button
                 onClick={() => setPerguntando(true)}
                 disabled={confirmando}
+                title="Pula o cliente: põe o pedido na fila do balcão e avisa depois"
                 className={cn(
-                  "inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-colors",
+                  // Deliberadamente mais discreto que "Pedir confirmação": o caminho
+                  // normal é o cliente decidir; puxar por cima dele é a exceção.
+                  "inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-secondary border border-border text-sm font-bold text-foreground hover:bg-secondary/70 transition-colors",
                   confirmando && "opacity-60 cursor-not-allowed"
                 )}
               >
                 {confirmando ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                Confirmar agora
+                Confirmar sem perguntar
               </button>
 
               <AlertDialog open={perguntando} onOpenChange={setPerguntando}>
@@ -256,10 +312,12 @@ export default function AgendadosLista({
   agendados,
   onAbrirPedido,
   onConfirmar,
+  onLiberar,
 }: {
   agendados: PedidoAgendado[];
   onAbrirPedido?: (pedidoId: string) => void;
   onConfirmar?: (a: PedidoAgendado) => Promise<void>;
+  onLiberar?: (a: PedidoAgendado) => Promise<void>;
 }) {
   const pendentes = agendados.filter((a) => AGENDADO_PENDENTES.includes(a.status));
   const encerrados = agendados.filter((a) => !AGENDADO_PENDENTES.includes(a.status));
@@ -286,7 +344,13 @@ export default function AgendadosLista({
           </h2>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {pendentes.map((a) => (
-              <Card key={a.id} a={a} onAbrirPedido={onAbrirPedido} onConfirmar={onConfirmar} />
+              <Card
+                key={a.id}
+                a={a}
+                onAbrirPedido={onAbrirPedido}
+                onConfirmar={onConfirmar}
+                onLiberar={onLiberar}
+              />
             ))}
           </div>
         </section>

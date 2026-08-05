@@ -19,6 +19,7 @@ import { externalSupabase, pinToPassword } from "@/integrations/supabase/externa
 import { cn } from "@/lib/utils";
 import { brl, moneyClass } from "@/lib/status";
 import FichaPedidoPorId from "@/components/FichaPedidoPorId";
+import EnderecoLink from "@/components/EnderecoLink";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -289,7 +290,7 @@ function MapaAoVivo({ despachos }: { despachos: DespachoFull[] }) {
               <div className="text-xs space-y-1">
                 <p className="font-semibold text-sm">Destino</p>
                 <p>{d.pedidos?.clientes?.nome ?? d.pedidos?.clientes?.telefone ?? "—"}</p>
-                {d.pedidos?.endereco && <p className="text-muted-foreground">{d.pedidos.endereco}</p>}
+                <EnderecoLink endereco={d.pedidos?.endereco} icone={false} linhas={0} className="text-xs" />
               </div>
             </Popup>
           </Marker>
@@ -390,9 +391,12 @@ function CardAoVivo({ d }: { d: DespachoFull }) {
       </div>
 
       {d.pedidos?.endereco && (
-        <div className="flex items-start gap-2 bg-secondary rounded-lg px-3 py-2">
-          <MapPin className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
-          <span className="text-xs flex-1 min-w-0 break-words">{d.pedidos.endereco}</span>
+        <div className="bg-secondary rounded-lg px-3 py-2">
+          <EnderecoLink
+            endereco={d.pedidos.endereco}
+            linhas={0}
+            className="flex gap-2 text-xs break-words"
+          />
         </div>
       )}
 

@@ -1,9 +1,10 @@
 import { ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Package, Users, Truck, LogOut, FlaskConical, ClipboardList, Bike } from "lucide-react";
+import { Package, Users, Truck, LogOut, Search, ClipboardList, Bike } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/BrandMark";
 import EntregaToggle from "@/components/EntregaToggle";
+import FarmaciaToggle from "@/components/FarmaciaToggle";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +22,9 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/estoque", icon: <Package className="w-5 h-5" />, label: "Estoque", adminOnly: true },
   { to: "/clientes", icon: <Users className="w-5 h-5" />, label: "Clientes" },
   { to: "/entregadores", icon: <Bike className="w-5 h-5" />, label: "Entregadores", adminOnly: true },
-  { to: "/scan", icon: <FlaskConical className="w-5 h-5" />, label: "Scan", adminOnly: true },
+  // Lupa, não frasco de laboratório: o SCAN é "procurar o que é este remédio",
+  // e a lupa é o que o balcão reconhece de imediato na fileira de ícones.
+  { to: "/scan", icon: <Search className="w-5 h-5" />, label: "Scan", adminOnly: true },
   { to: "/entregas", icon: <Truck className="w-5 h-5" />, label: "Entregas", entregadorOnly: true },
 ];
 
@@ -109,8 +112,11 @@ function SidebarContent() {
         </div>
       </div>
 
-      {/* Entrega: primeira coisa da sidebar — é o estado que o balcão mais consulta e altera */}
+      {/* Os dois estados que decidem o que a Ana responde, no topo e nesta ordem:
+          "a farmácia atende?" vem antes de "a farmácia entrega?" — fechada, o
+          toggle de entrega não muda nada para o cliente. */}
       <div className="pt-4">
+        <FarmaciaToggle />
         <EntregaToggle />
       </div>
 
@@ -135,7 +141,9 @@ function MobileNav() {
 
   return (
     <nav className="flex gap-2 px-3 pb-2.5 overflow-x-auto">
-      {/* Primeiro da fileira, antes das seções: no mobile o balcão precisa alcançar sem rolar */}
+      {/* Primeiros da fileira, antes das seções: no mobile o balcão precisa
+          alcançar sem rolar. Mesma ordem da sidebar. */}
+      <FarmaciaToggle variant="mobile" />
       <EntregaToggle variant="mobile" />
       {items.map((item) => (
         <NavLink

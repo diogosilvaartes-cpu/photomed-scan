@@ -9,9 +9,11 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { statusConfig, brl, moneyClass } from "@/lib/status";
+import CodigoPedido from "@/components/CodigoPedido";
+import EnderecoLink from "@/components/EnderecoLink";
 import {
   type Pedido, type EntregadorFull,
-  fichaTexto, formatPhone, fotoWhatsApp, isCoords, itensValidos, mapsLink, pedidoNumero, timeAgo,
+  fichaTexto, formatPhone, fotoWhatsApp, itensValidos, mapsLink, pedidoNumero, timeAgo,
 } from "@/lib/pedido";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -132,9 +134,9 @@ export default function FichaPedido({
               <cfg.Icon className="w-3.5 h-3.5" />
               {cfg.label}
             </span>
-            <span className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground">
-              <Hash className="w-3 h-3" />
-              {pedidoNumero(pedido)}
+            <span className="inline-flex items-center gap-1 text-muted-foreground">
+              <Hash className="w-4 h-4" />
+              <CodigoPedido codigo={pedidoNumero(pedido)} tamanho="lg" />
             </span>
             {pedido.created_at && (
               <span className="text-xs text-muted-foreground">
@@ -232,7 +234,12 @@ export default function FichaPedido({
               {pedido.endereco ? (
                 <>
                   <Linha rotulo="Endereço">
-                    {isCoords(pedido.endereco) ? "Localização GPS" : pedido.endereco}
+                    <EnderecoLink
+                      endereco={pedido.endereco}
+                      icone={false}
+                      linhas={0}
+                      className="font-medium"
+                    />
                   </Linha>
                   <a
                     href={mapsLink(pedido.endereco)}
