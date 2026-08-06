@@ -60,11 +60,6 @@ const SLA_MINUTOS = 45;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function minutosEntre(inicio: string | null, fim: string | null) {
-  if (!inicio || !fim) return null;
-  return (new Date(fim).getTime() - new Date(inicio).getTime()) / 60000;
-}
-
 function minutosDesde(dateStr: string | null) {
   if (!dateStr) return null;
   return (Date.now() - new Date(dateStr).getTime()) / 60000;
@@ -624,7 +619,6 @@ export function AbaHistorico({ despachos, entregadores }: {
         <div className="space-y-2">
           {finalizados.map((d) => {
             const cancelado = !d.entregue_em;
-            const dur = minutosEntre(d.saiu_em, d.entregue_em);
             const recebido = totalRecebido(d.pagamento_recebido);
             return (
               <button
@@ -665,7 +659,6 @@ export function AbaHistorico({ despachos, entregadores }: {
                     </p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
                       {format(new Date(d.entregue_em ?? d.enviado_em), "dd/MM/yy 'às' HH:mm", { locale: ptBR })}
-                      {dur != null ? ` · ${duracaoCurta(dur)} em rota` : ""}
                     </p>
                     {d.observacao && (
                       <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1.5">

@@ -229,7 +229,7 @@ export default function FichaPedido({
   return (
     <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[88dvh] overflow-y-auto">
         <DialogHeader className="space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={cn(

@@ -111,7 +111,7 @@ export function NovoProdutoModal({ aberto, onFechar, onPronto }: {
 
   return (
     <Dialog open={aberto} onOpenChange={(v) => { if (!v) onFechar(); }}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Novo produto</DialogTitle>
         </DialogHeader>
@@ -323,7 +323,7 @@ export function ImportarEstoqueModal({ aberto, onFechar, atuais, onPronto }: {
 
   return (
     <Dialog open={aberto} onOpenChange={(v) => { if (!v) fechar(); }}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Importar lista de estoque</DialogTitle>
         </DialogHeader>
@@ -388,7 +388,7 @@ export function ImportarEstoqueModal({ aberto, onFechar, atuais, onPronto }: {
               </p>
             )}
 
-            <div className="max-h-[45vh] overflow-y-auto rounded-xl border border-border">
+            <div className="max-h-[45dvh] overflow-y-auto rounded-xl border border-border">
               <table className="w-full text-sm">
                 <thead className="bg-secondary text-muted-foreground text-xs uppercase sticky top-0">
                   <tr>

@@ -265,7 +265,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </header>
 
         {/* Página */}
-        <main className="flex-1 overflow-y-auto">
+        {/* min-h-0: sem isso, um filho flex com overflow-y-auto não encolhe —
+            ele cresce pra caber o conteúdo e o overflow-hidden do wrapper só
+            corta o excesso, sem dar rolagem nenhuma. É o que travava a página
+            inteira no mobile. */}
+        <main className="flex-1 min-h-0 overflow-y-auto">
           {children}
         </main>
       </div>

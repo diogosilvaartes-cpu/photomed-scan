@@ -350,7 +350,7 @@ export default function NovoPedidoModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v && !salvando) onClose(); }}>
-      <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[92dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShoppingCart className="w-5 h-5 text-primary" />
