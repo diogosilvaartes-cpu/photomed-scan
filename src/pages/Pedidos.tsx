@@ -1036,12 +1036,13 @@ export default function Pedidos() {
           </div>
         </div>
 
-        {/* Abas */}
-        <div className="flex gap-1 flex-wrap">
+        {/* Abas — sem flex-wrap: no mobile, quebrar linha aqui empurrava os
+            Cards pra fora da metade da tela. Rola de lado em vez de quebrar. */}
+        <div className="flex gap-1 overflow-x-auto">
           <button
             onClick={() => setAba("kanban")}
             className={cn(
-              "px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
+              "shrink-0 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
               aba === "kanban" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary"
             )}
           >
@@ -1051,7 +1052,7 @@ export default function Pedidos() {
           <button
             onClick={() => setAba("na_rua")}
             className={cn(
-              "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
+              "shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
               aba === "na_rua" ? "bg-status-rua text-white" : "text-muted-foreground hover:bg-secondary"
             )}
           >
@@ -1071,7 +1072,7 @@ export default function Pedidos() {
           <button
             onClick={() => setAba("agendados")}
             className={cn(
-              "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border",
+              "shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border",
               aba === "agendados"
                 ? "bg-status-separacao text-white border-transparent"
                 : agendadosPendentes > 0
@@ -1093,7 +1094,7 @@ export default function Pedidos() {
           <button
             onClick={() => setAba("historico")}
             className={cn(
-              "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
+              "shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
               aba === "historico" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary"
             )}
           >
@@ -1166,14 +1167,15 @@ export default function Pedidos() {
             </button>
           )}
 
-          {/* Filtros */}
-          <div className="px-4 pb-3 pt-3 flex flex-wrap gap-2">
+          {/* Filtros — sem flex-wrap pelo mesmo motivo das Abas: no mobile,
+              5 chips quebravam pra uma 2ª linha e comiam a altura dos Cards. */}
+          <div className="px-4 pb-3 pt-3 flex gap-2 overflow-x-auto">
             {COLUNAS.map((col) => (
               <button
                 key={col.status}
                 onClick={() => toggleFiltro(col.status)}
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
+                  "shrink-0 flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
                   filtros.includes(col.status)
                     ? `${col.badge} border-transparent`
                     : "bg-background text-muted-foreground border-border"
@@ -1187,17 +1189,25 @@ export default function Pedidos() {
           </div>
 
           {/* Kanban board */}
-          <div className="flex-1 overflow-x-auto overflow-y-hidden">
-            <div className="flex gap-4 p-4 items-start min-h-full" style={{ minWidth: "max-content" }}>
+          {/* min-h-0 é o que faz este flex item PARAR de crescer pra caber o
+              conteúdo — sem ele, a coluna interna (com sua própria rolagem)
+              ficava livre pra passar da altura real da tela, e o overflow-y-hidden
+              aqui cortava o resto do card fora sem dar pra rolar até lá. Antes
+              disso a coluna usava max-h-[calc(100vh-260px)]: um número mágico que
+              já supunha 260px de cabeçalho (errado assim que o header ganha mais
+              uma linha, principalmente no mobile) e ainda usava vh, que no celular
+              conta a área atrás da barra de endereço como visível. */}
+          <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+            <div className="flex gap-4 p-4 h-full" style={{ minWidth: "max-content" }}>
               {COLUNAS.filter((col) => filtros.includes(col.status)).map((col) => {
                 const items = byStatus(col.status);
                 return (
-                  <div key={col.status} className="flex-shrink-0 w-72 sm:w-80 flex flex-col gap-3">
-                    <div className={cn("flex items-center justify-between px-4 py-2.5 rounded-xl", col.bgLight)}>
+                  <div key={col.status} className="flex-shrink-0 w-72 sm:w-80 h-full flex flex-col gap-3">
+                    <div className={cn("shrink-0 flex items-center justify-between px-4 py-2.5 rounded-xl", col.bgLight)}>
                       <span className={cn("font-bold text-base flex items-center gap-1.5", col.text)}><col.Icon className="w-4 h-4 shrink-0" />{col.label}</span>
                       <span className={cn("text-xs font-bold px-2 py-0.5 rounded-full", col.badge)}>{items.length}</span>
                     </div>
-                    <div className="flex flex-col gap-3 max-h-[calc(100vh-260px)] overflow-y-auto pr-0.5">
+                    <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-0.5">
                       {items.length === 0 ? (
                         <p className="text-center text-sm text-muted-foreground py-10">Nenhum pedido</p>
                       ) : (

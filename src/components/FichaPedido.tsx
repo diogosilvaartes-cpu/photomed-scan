@@ -4,9 +4,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { useToast } from "@/hooks/use-toast";
 import { useOperador } from "@/lib/operador";
+import { useAuth } from "@/lib/auth";
 import {
   Phone, MapPin, CreditCard, Package, Truck, Clock, CheckCircle, Navigation,
   LocateFixed, StickyNote, User, Hash, Camera, Link2, ChevronRight, Compass, Ban, ZoomIn,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -17,10 +19,20 @@ import CodigoPedido from "@/components/CodigoPedido";
 import EnderecoLink from "@/components/EnderecoLink";
 import ImageLightbox from "@/components/ImageLightbox";
 import MotivoCancelamento from "@/components/MotivoCancelamento";
+import DespacharModal from "@/components/DespacharModal";
+import ConfirmarPagamentoModal from "@/components/ConfirmarPagamentoModal";
+import { confirmarEntregaPedido, pagamentoJaRegistrado } from "@/lib/confirmarEntrega";
 import {
-  type Pedido, type EntregadorFull,
+  type Pedido, type EntregadorFull, type ItemPagamento,
   formatPhone, fotoWhatsApp, itensValidos, mapsLink, pedidoNumero, timeAgo,
 } from "@/lib/pedido";
+
+/** Rótulo do botão dinâmico — mesmo trio que existe no Kanban e na ficha do cliente. */
+const PROXIMA_ACAO: Record<string, string> = {
+  novo: "Iniciar Separação",
+  em_separacao: "Despachar",
+  saiu_para_entrega: "Confirmar Entrega",
+};
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -128,12 +140,78 @@ export default function FichaPedido({
   const { toast } = useToast();
   const qc = useQueryClient();
   const operador = useOperador();
+  const { role } = useAuth();
   const [cancelando, setCancelando] = useState(false);
   const [motivo, setMotivo] = useState("");
 
+  /**
+   * Botão dinâmico Iniciar Separação → Despachar → Confirmar Entrega, o
+   * mesmo trio do Kanban e da ficha do cliente. Reusa as mesmas peças
+   * (`DespacharModal`, `confirmarEntregaPedido`) em vez de reimplementar —
+   * já divergiu antes entre essas telas. Admin only: quem abre a ficha por
+   * link (`/pedido/:codigo`) pode ser o próprio entregador.
+   */
+  const [statusAtual, setStatusAtual] = useState(pedido.status);
+  useEffect(() => setStatusAtual(pedido.status), [pedido.id, pedido.status]);
+
   // Pedido já entregue ou já cancelado não volta atrás por aqui: desfazer baixa
   // é decisão de balcão, não de um clique numa ficha aberta por link.
-  const podeCancelar = pedido.status !== "cancelado" && pedido.status !== "entregue";
+  const podeCancelar = statusAtual !== "cancelado" && statusAtual !== "entregue";
+
+  const [iniciandoSeparacao, setIniciandoSeparacao] = useState(false);
+  const [despachando, setDespachando] = useState(false);
+  const [pagamentoPendente, setPagamentoPendente] = useState(false);
+  const [confirmandoPagamento, setConfirmandoPagamento] = useState(false);
+  const entregadoresAtivos = entregadores.filter((e) => e.ativo);
+
+  function refetchPedido() {
+    qc.invalidateQueries({ queryKey: ["pedidos"] });
+    qc.invalidateQueries({ queryKey: ["pedidos-cliente"] });
+    qc.invalidateQueries({ queryKey: ["ficha-pedido"] });
+    qc.invalidateQueries({ queryKey: ["pedido-link"] });
+    qc.invalidateQueries({ queryKey: ["pedido-ativo-completo"] });
+  }
+
+  async function iniciarSeparacao() {
+    setIniciandoSeparacao(true);
+    const { error } = await externalSupabase
+      .from("pedidos")
+      .update({ status: "em_separacao", ...operador })
+      .eq("id", pedido.id);
+    setIniciandoSeparacao(false);
+    if (error) {
+      toast({ title: "Não deu para iniciar a separação", description: error.message, variant: "destructive" });
+      return;
+    }
+    setStatusAtual("em_separacao");
+    refetchPedido();
+  }
+
+  async function confirmarEntregaAgora(pagamentos: ItemPagamento[] | null) {
+    setConfirmandoPagamento(true);
+    const { avisouCliente } = await confirmarEntregaPedido(pedido, pagamentos, operador);
+    setConfirmandoPagamento(false);
+    setPagamentoPendente(false);
+    refetchPedido();
+    toast({ title: "Entrega confirmada!" });
+    if (!avisouCliente) {
+      toast({
+        title: "Cliente não foi avisado",
+        description: "O status foi salvo, mas o WhatsApp não saiu.",
+        variant: "destructive",
+      });
+    }
+    onClose();
+  }
+
+  function acionarBotaoPedido() {
+    if (statusAtual === "novo") { iniciarSeparacao(); return; }
+    if (statusAtual === "em_separacao") { setDespachando(true); return; }
+    if (statusAtual === "saiu_para_entrega") {
+      if (pagamentoJaRegistrado(pedido)) confirmarEntregaAgora(null);
+      else setPagamentoPendente(true);
+    }
+  }
 
   const cancelarPedido = useMutation({
     mutationFn: async () => {
@@ -188,7 +266,7 @@ export default function FichaPedido({
       toast({ title: "Não deu para cancelar", description: e.message, variant: "destructive" }),
   });
 
-  const cfg = statusConfig(pedido.status);
+  const cfg = statusConfig(statusAtual);
   const itens = itensValidos(pedido);
   const despacho = pedido.despacho_entrega?.[0] ?? null;
   const entregador = despacho?.entregador_id
@@ -578,7 +656,7 @@ export default function FichaPedido({
 
         {/* Por que o pedido caiu — gravado no cancelamento pelo painel. Sem isto,
             o motivo ficava só no banco e no WhatsApp do grupo. */}
-        {pedido.status === "cancelado" && pedido.motivo_cancelamento && (
+        {statusAtual === "cancelado" && pedido.motivo_cancelamento && (
           <div className="mb-2 flex items-start gap-2 rounded-lg border border-status-cancelado/30 bg-status-cancelado/10 px-3 py-2">
             <Ban className="mt-0.5 h-4 w-4 shrink-0 text-status-ink-cancelado" />
             <div className="min-w-0">
@@ -598,6 +676,19 @@ export default function FichaPedido({
             ? <>Balcão: <span className="font-semibold text-foreground">{pedido.operador_nome}</span></>
             : "Fechado pela Maria, no WhatsApp"}
         </p>
+
+        {role === "admin" && PROXIMA_ACAO[statusAtual ?? ""] && (
+          <button
+            onClick={acionarBotaoPedido}
+            disabled={iniciandoSeparacao || confirmandoPagamento}
+            className="w-full flex items-center justify-center gap-2 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-60"
+          >
+            {iniciandoSeparacao || confirmandoPagamento
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <Truck className="w-4 h-4" />}
+            {PROXIMA_ACAO[statusAtual ?? ""]}
+          </button>
+        )}
 
         {podeCancelar && (
           <div className="mt-2">
@@ -649,6 +740,22 @@ export default function FichaPedido({
       alt="Referência do local"
       open={!!fotoAmpliada}
       onClose={() => setFotoAmpliada(null)}
+    />
+    <DespacharModal
+      pedido={pedido}
+      entregadores={entregadoresAtivos}
+      open={despachando}
+      onClose={() => setDespachando(false)}
+      onDone={() => { refetchPedido(); onClose(); }}
+    />
+    <ConfirmarPagamentoModal
+      open={pagamentoPendente}
+      onClose={() => setPagamentoPendente(false)}
+      valorEsperado={pedido.valor_total}
+      pending={confirmandoPagamento}
+      onConfirmar={confirmarEntregaAgora}
+      titulo="Como foi pago?"
+      confirmLabel="Confirmar entrega"
     />
     </>
   );
