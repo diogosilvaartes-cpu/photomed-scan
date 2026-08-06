@@ -45,7 +45,7 @@ const horaCurta = (iso: string | null) =>
 export default function FarmaciaToggle({
   variant = "sidebar",
 }: {
-  variant?: "sidebar" | "mobile";
+  variant?: "sidebar" | "mobile" | "compacto";
 }) {
   const { role } = useAuth();
   const [cfg, setCfg] = useState<ConfigHorario | null>(null);
@@ -123,12 +123,12 @@ export default function FarmaciaToggle({
       <div
         className={cn(
           "flex items-center justify-center gap-2 rounded-2xl border border-dashed text-xs font-semibold",
-          variant === "sidebar"
-            ? "mx-3 mb-1 h-[92px] border-sidebar-border text-sidebar-foreground/60"
-            : "h-[62px] shrink-0 px-4 border-border text-muted-foreground",
+          variant === "sidebar" && "mx-3 mb-1 h-[92px] border-sidebar-border text-sidebar-foreground/60",
+          variant === "compacto" && "mx-3 mb-1 h-8 border-sidebar-border text-sidebar-foreground/60",
+          variant === "mobile" && "h-[62px] shrink-0 px-4 border-border text-muted-foreground",
         )}
       >
-        {erro ? "horário: indisponível" : <Loader2 className="w-4 h-4 animate-spin" />}
+        {erro ? "horário: —" : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
       </div>
     );
   }
@@ -136,6 +136,53 @@ export default function FarmaciaToggle({
   const aberta = h.aberta;
   const Icone = aberta ? DoorOpen : DoorClosed;
   const ateQuando = horaCurta(cfg.override?.ate ?? null);
+
+  if (variant === "compacto") {
+    // `clicar` aplica direto quando o destino concorda com a tabela de horário e
+    // levanta `perguntando` quando discorda — é o caso de assumir "fora do
+    // horário" na mão. Aqui a pergunta cabe no próprio botão: o pill vira
+    // CONFIRMAR e o segundo toque grava.
+    return (
+      <button
+        type="button"
+        onClick={perguntando ? confirmarForcar : clicar}
+        onBlur={() => setPerguntando(false)}
+        disabled={!podeMexer || salvando}
+        aria-pressed={aberta}
+        title={podeMexer ? "Abrir/fechar a farmácia" : "Somente o balcão altera"}
+        className={cn(
+          "mx-3 mb-1 flex w-[calc(100%-1.5rem)] items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-colors",
+          "text-sidebar-foreground hover:bg-sidebar-accent/50",
+          perguntando && "bg-amber-500/20",
+          (!podeMexer || salvando) && "opacity-70",
+        )}
+      >
+        {salvando
+          ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+          : <Icone className="w-3.5 h-3.5 shrink-0" />}
+        <span className="truncate">
+          {perguntando ? (aberta ? "Fechar agora?" : "Abrir agora?") : "Farmácia"}
+        </span>
+        {/* Ponto discreto para o estado forçado na mão: sem ele, ninguém percebe
+            que a loja está aberta/fechada por override em vez do horário. */}
+        {!perguntando && h.forcado && (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" title="Forçado manualmente" />
+        )}
+        <span
+          className={cn(
+            "ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-extrabold",
+            perguntando
+              ? "bg-amber-500 text-white"
+              : aberta
+                ? "bg-[hsl(var(--money))] text-white"
+                : "bg-[hsl(var(--destructive))] text-white",
+          )}
+        >
+          {perguntando ? "CONFIRMAR" : aberta ? "ABERTA" : "FECHADA"}
+        </span>
+      </button>
+    );
+  }
 
   const legenda = h.forcado
     ? `Manual até ${ateQuando ?? "novo aviso"}`

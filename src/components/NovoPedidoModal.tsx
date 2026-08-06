@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Loader2, Search, User, Plus, X, Trash2, Package, MapPin, Check, ShoppingCart,
 } from "lucide-react";
+import { useOperador } from "@/lib/operador";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -73,6 +74,9 @@ export default function NovoPedidoModal({
   onDone: () => void;
 }) {
   const { toast } = useToast();
+  // Pedido do balcão sempre tem dono: é a diferença entre "a Maria fechou" e
+  // "alguém daqui digitou", e é o que permite cobrar explicação depois.
+  const operador = useOperador();
   const [salvando, setSalvando] = useState(false);
 
   // ─── cliente ───
@@ -303,6 +307,7 @@ export default function NovoPedidoModal({
           obs_entrega: obsEntrega.trim() || null,
           pessoa_recebimento: pessoaRecebimento.trim() || null,
           resumo: `Pedido do balcão — ${resumoItens}`,
+          ...operador,
         })
         .select("id, codigo")
         .single();

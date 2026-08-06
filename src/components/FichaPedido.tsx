@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { externalSupabase } from "@/integrations/supabase/external-client";
+import { useToast } from "@/hooks/use-toast";
+import { useOperador } from "@/lib/operador";
 import {
   Phone, MapPin, CreditCard, Package, Truck, Clock, CheckCircle, Navigation,
-  LocateFixed, Copy, Check, StickyNote, User, Hash, Camera, Link2, ChevronRight, Compass,
+  LocateFixed, StickyNote, User, Hash, Camera, Link2, ChevronRight, Compass, Ban, ZoomIn,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -12,17 +15,25 @@ import { cn } from "@/lib/utils";
 import { statusConfig, brl, moneyClass } from "@/lib/status";
 import CodigoPedido from "@/components/CodigoPedido";
 import EnderecoLink from "@/components/EnderecoLink";
+import ImageLightbox from "@/components/ImageLightbox";
+import MotivoCancelamento from "@/components/MotivoCancelamento";
 import {
   type Pedido, type EntregadorFull,
-  fichaTexto, formatPhone, fotoWhatsApp, itensValidos, mapsLink, pedidoNumero, timeAgo,
+  formatPhone, fotoWhatsApp, itensValidos, mapsLink, pedidoNumero, timeAgo,
 } from "@/lib/pedido";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
+/** Grupo Balcão no WhatsApp — mesmo ID usado pelos workflows do n8n. */
+const GRUPO_BALCAO = "120363412345233268-group";
+
 /**
  * Ficha completa do pedido — o mesmo resumo que vai para o entregador,
  * em formato de card expandido. Abre ao clicar em qualquer card da fila.
- * Somente leitura: toda ação continua nos cards.
+ *
+ * Quase toda ação continua nos cards; a exceção é o CANCELAMENTO, que precisa
+ * estar aqui porque a ficha é a única tela aberta por link (`/pedido/:codigo`)
+ * — quem recebe o link do pedido não tem a fila na frente.
  */
 
 function dataHora(iso: string | null | undefined) {
@@ -75,8 +86,8 @@ export default function FichaPedido({
   open: boolean;
   onClose: () => void;
 }) {
-  const [copiado, setCopiado] = useState(false);
   const navigate = useNavigate();
+  const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
 
   /**
    * Referência e fotos do LOCAL — as notas que o entregador deixou e que valem
@@ -87,22 +98,95 @@ export default function FichaPedido({
    * que a referência **só existia no WhatsApp** (o `Desp_Montar_Msg` faz o join)
    * e nunca aparecia na ficha do painel.
    */
-  const [local, setLocal] = useState<{ referencia: string | null; fotos: string[] | null } | null>(null);
+  const [local, setLocal] = useState<{
+    referencia: string | null;
+    fotos: string[] | null;
+    latitude: number | null;
+    longitude: number | null;
+  } | null>(null);
 
   useEffect(() => {
-    if (!open || !pedido.cliente_id || !pedido.endereco) { setLocal(null); return; }
+    if (!open || !pedido.cliente_id) { setLocal(null); return; }
+    if (!pedido.endereco_id && !pedido.endereco) { setLocal(null); return; }
     let vivo = true;
     (async () => {
-      const { data } = await externalSupabase
+      // `endereco_id` primeiro: o casamento por texto exato falhava sempre que a
+      // grafia mudava ("Rua X, 10" vs "rua x 10") e a referência do local sumia
+      // da ficha. O texto continua como fallback para os pedidos antigos, que
+      // nasceram antes da coluna existir.
+      const q = externalSupabase
         .from("enderecos")
-        .select("referencia, fotos")
-        .eq("cliente_id", pedido.cliente_id)
-        .eq("label_exibicao", pedido.endereco)
-        .limit(1);
+        .select("referencia, fotos, latitude, longitude");
+      const { data } = pedido.endereco_id
+        ? await q.eq("id", pedido.endereco_id).limit(1)
+        : await q.eq("cliente_id", pedido.cliente_id).eq("label_exibicao", pedido.endereco!).limit(1);
       if (vivo) setLocal(data?.[0] ?? null);
     })();
     return () => { vivo = false; };
-  }, [open, pedido.cliente_id, pedido.endereco]);
+  }, [open, pedido.cliente_id, pedido.endereco, pedido.endereco_id]);
+
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const operador = useOperador();
+  const [cancelando, setCancelando] = useState(false);
+  const [motivo, setMotivo] = useState("");
+
+  // Pedido já entregue ou já cancelado não volta atrás por aqui: desfazer baixa
+  // é decisão de balcão, não de um clique numa ficha aberta por link.
+  const podeCancelar = pedido.status !== "cancelado" && pedido.status !== "entregue";
+
+  const cancelarPedido = useMutation({
+    mutationFn: async () => {
+      const { error } = await externalSupabase
+        .from("pedidos")
+        .update({ status: "cancelado", motivo_cancelamento: motivo.trim(), ...operador })
+        .eq("id", pedido.id);
+      if (error) throw error;
+
+      // Baixa as duas pontas: quem olha o Kanban lê `pedidos.status` e quem olha o
+      // monitor de entregas lê `despacho_entrega.status_entrega` — mexer só em uma
+      // deixa a outra tela mentindo.
+      if (pedido.despacho_entrega?.length) {
+        await externalSupabase
+          .from("despacho_entrega")
+          .update({ status_entrega: "cancelado" })
+          .eq("pedido_id", pedido.id);
+      }
+
+      // Aviso ao Balcão é parte do cancelamento, mas não pode derrubá-lo: se o
+      // WhatsApp falhar, o pedido já está cancelado e o grupo vê na fila.
+      try {
+        await fetch("/api/notify-client", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: GRUPO_BALCAO,
+            message:
+              `🚫 *PEDIDO CANCELADO* ${pedido.codigo ?? ""}\n\n` +
+              `👤 ${pedido.clientes?.nome ?? "Sem nome"}\n` +
+              (pedido.clientes?.telefone ? `📱 https://wa.me/${pedido.clientes.telefone.replace(/\D/g, "")}\n` : "") +
+              `📝 Motivo: ${motivo.trim()}\n\n` +
+              `_Cancelado pelo painel. O cliente NÃO foi avisado — falem com ele._`,
+          }),
+        });
+      } catch {
+        /* silencioso de propósito: ver comentário acima */
+      }
+    },
+    onSuccess: () => {
+      toast({
+        title: "Pedido cancelado",
+        description: "O grupo Balcão foi avisado. O cliente não recebeu nada — falem com ele.",
+      });
+      setCancelando(false);
+      setMotivo("");
+      qc.invalidateQueries({ queryKey: ["pedidos"] });
+      qc.invalidateQueries({ queryKey: ["pedidos-cliente"] });
+      onClose();
+    },
+    onError: (e: Error) =>
+      toast({ title: "Não deu para cancelar", description: e.message, variant: "destructive" }),
+  });
 
   const cfg = statusConfig(pedido.status);
   const itens = itensValidos(pedido);
@@ -116,7 +200,10 @@ export default function FichaPedido({
   // `foto_url` costuma vir vazia ou com link expirado — o proxy é o fallback.
   const avatar = pedido.clientes?.foto_url?.trim() || fotoWhatsApp(pedido.clientes?.telefone);
 
-  const recebido = despacho?.pagamento_recebido ?? [];
+  // despacho é a fonte quando o entregador registrou pelo celular dele;
+  // pedido.pagamento_recebido é o que o balcão registra ao confirmar pelo
+  // Kanban/"Na rua" quando ninguém tinha registrado ainda.
+  const recebido = despacho?.pagamento_recebido ?? pedido.pagamento_recebido ?? [];
   const totalRecebido = recebido.reduce((s, pg) => s + (pg.valor ?? 0), 0);
 
   const timeline: { rotulo: string; iso: string | null; Icon: typeof Clock; cor?: string }[] = [
@@ -139,17 +226,8 @@ export default function FichaPedido({
     navigate(`/clientes?id=${pedido.cliente_id}`);
   }
 
-  async function copiar() {
-    try {
-      await navigator.clipboard.writeText(fichaTexto(pedido, entregador?.nome));
-      setCopiado(true);
-      setTimeout(() => setCopiado(false), 2000);
-    } catch {
-      /* clipboard bloqueado — sem alarde */
-    }
-  }
-
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto">
         <DialogHeader className="space-y-2">
@@ -285,15 +363,30 @@ export default function FichaPedido({
                       className="font-medium"
                     />
                   </Linha>
-                  <a
-                    href={mapsLink(pedido.endereco)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline pt-1"
-                  >
-                    <Navigation className="w-3.5 h-3.5" />
-                    Abrir no Google Maps
-                  </a>
+                  {/* Coordenada do endereço ganha do texto: o OSM não conhece metade
+                      das ruas de Araruama, então buscar pelo nome joga o entregador
+                      no meio da rua errada. Com o pin, ele chega na porta. */}
+                  {local?.latitude != null && local?.longitude != null ? (
+                    <a
+                      href={`https://maps.google.com/?q=${local.latitude},${local.longitude}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline pt-1"
+                    >
+                      <Navigation className="w-3.5 h-3.5" />
+                      Abrir localização exata
+                    </a>
+                  ) : (
+                    <a
+                      href={mapsLink(pedido.endereco)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline pt-1"
+                    >
+                      <Navigation className="w-3.5 h-3.5" />
+                      Abrir no Google Maps
+                    </a>
+                  )}
                 </>
               ) : (
                 <Linha rotulo="Endereço">—</Linha>
@@ -330,13 +423,19 @@ export default function FichaPedido({
                 </p>
                 <div className="flex gap-2 flex-wrap">
                   {local!.fotos!.map((url, i) => (
-                    <a key={i} href={url} target="_blank" rel="noreferrer">
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setFotoAmpliada(url)}
+                      className="relative group"
+                    >
                       <img
                         src={url}
                         alt={`Foto ${i + 1} do local`}
-                        className="w-20 h-20 rounded-lg object-cover border border-border hover:opacity-80 transition-opacity"
+                        className="w-20 h-20 rounded-lg object-cover border border-border group-hover:opacity-80 transition-opacity"
                       />
-                    </a>
+                      <ZoomIn className="absolute bottom-1 right-1 w-3.5 h-3.5 text-white drop-shadow opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
                   ))}
                 </div>
               </div>
@@ -477,15 +576,80 @@ export default function FichaPedido({
           )}
         </div>
 
-        <button
-          onClick={copiar}
-          className="w-full flex items-center justify-center gap-2 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:bg-primary/90 transition-colors"
-        >
-          {copiado
-            ? <><Check className="w-4 h-4" />Ficha copiada!</>
-            : <><Copy className="w-4 h-4" />Copiar ficha do entregador</>}
-        </button>
+        {/* Por que o pedido caiu — gravado no cancelamento pelo painel. Sem isto,
+            o motivo ficava só no banco e no WhatsApp do grupo. */}
+        {pedido.status === "cancelado" && pedido.motivo_cancelamento && (
+          <div className="mb-2 flex items-start gap-2 rounded-lg border border-status-cancelado/30 bg-status-cancelado/10 px-3 py-2">
+            <Ban className="mt-0.5 h-4 w-4 shrink-0 text-status-ink-cancelado" />
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-status-ink-cancelado">
+                Motivo do cancelamento
+              </p>
+              <p className="text-sm text-foreground">{pedido.motivo_cancelamento}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Quem respondeu por este pedido. Distingue o que a Maria fechou sozinha
+            do que alguém do balcão digitou ou alterou. */}
+        <p className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <User className="h-3.5 w-3.5 shrink-0" />
+          {pedido.operador_nome
+            ? <>Balcão: <span className="font-semibold text-foreground">{pedido.operador_nome}</span></>
+            : "Fechado pela Maria, no WhatsApp"}
+        </p>
+
+        {podeCancelar && (
+          <div className="mt-2">
+            {!cancelando ? (
+              <button
+                onClick={() => setCancelando(true)}
+                className="w-full flex items-center justify-center gap-2 h-10 rounded-xl border border-destructive/40 text-destructive text-sm font-semibold hover:bg-destructive/5 transition-colors"
+              >
+                <Ban className="w-4 h-4" />
+                Cancelar pedido
+              </button>
+            ) : (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3">
+                <p className="text-sm font-semibold text-destructive mb-2">
+                  Cancelar o pedido {pedido.codigo ?? ""}? Por quê?
+                </p>
+                <div className="mb-2">
+                  <MotivoCancelamento value={motivo} onChange={setMotivo} />
+                </div>
+                {/* O cliente NÃO é avisado daqui: a regra da casa é que o WhatsApp do
+                    cancelamento sai do balcão, que sabe o que combinar (remarcar,
+                    devolver pagamento). O grupo recebe o aviso para agir. */}
+                <p className="text-[11px] text-muted-foreground mb-2">
+                  O cliente não é avisado automaticamente. O grupo Balcão recebe o aviso.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => cancelarPedido.mutate()}
+                    disabled={!motivo.trim() || cancelarPedido.isPending}
+                    className="flex-1 h-9 rounded-lg bg-destructive text-destructive-foreground text-sm font-bold disabled:opacity-50"
+                  >
+                    {cancelarPedido.isPending ? "Cancelando..." : "Confirmar cancelamento"}
+                  </button>
+                  <button
+                    onClick={() => { setCancelando(false); setMotivo(""); }}
+                    className="h-9 rounded-lg border border-border px-3 text-sm"
+                  >
+                    Voltar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
+    <ImageLightbox
+      src={fotoAmpliada}
+      alt="Referência do local"
+      open={!!fotoAmpliada}
+      onClose={() => setFotoAmpliada(null)}
+    />
+    </>
   );
 }

@@ -1,20 +1,13 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import {
   Loader2, RefreshCw, Phone, CreditCard, Package, ChevronRight, X, Clock,
   Truck, Navigation, LocateFixed, CheckCircle, Eye, FileText, History, Plus, AlarmClock, Search,
-  CalendarDays, MessagesSquare,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -24,17 +17,19 @@ import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { STATUS, statusConfig, brl, moneyClass } from "@/lib/status";
 import FichaPedido from "@/components/FichaPedido";
+import DespacharModal from "@/components/DespacharModal";
 import NovoPedidoModal from "@/components/NovoPedidoModal";
 import CodigoPedido from "@/components/CodigoPedido";
 import EnderecoLink from "@/components/EnderecoLink";
+import MotivoCancelamento from "@/components/MotivoCancelamento";
+import ConfirmarPagamentoModal from "@/components/ConfirmarPagamentoModal";
+import { confirmarEntregaPedido, pagamentoJaRegistrado } from "@/lib/confirmarEntrega";
+import { useOperador } from "@/lib/operador";
 import AgendadosLista, {
   type PedidoAgendado, AGENDADO_SELECT, AGENDADO_PENDENTES,
 } from "@/components/AgendadosLista";
-import Conversas, {
-  fetchConversas, agruparPorTelefone, statusPausa,
-} from "@/pages/Conversas";
 import {
-  type Pedido, type EntregadorFull,
+  type Pedido, type EntregadorFull, type ItemPagamento,
   PEDIDO_SELECT, formatPhone, formatCurrency, timeAgo, pedidoNumero,
 } from "@/lib/pedido";
 import { format, addDays, startOfDay } from "date-fns";
@@ -295,229 +290,6 @@ function pararPropagacao(e: React.MouseEvent) {
   e.stopPropagation();
 }
 
-// ─── DespacharModal ───────────────────────────────────────────────────────────
-
-function DespacharModal({
-  pedido,
-  entregadores,
-  open,
-  onClose,
-  onDone,
-}: {
-  pedido: Pedido;
-  entregadores: EntregadorFull[];
-  open: boolean;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const { toast } = useToast();
-  const despachoExistenteInicial = pedido.despacho_entrega?.[0] ?? null;
-  const [selectedId, setSelectedId] = useState<string>(despachoExistenteInicial?.entregador_id ?? "");
-  const [loading, setLoading] = useState(false);
-
-  async function confirmar() {
-    setLoading(true);
-    try {
-      // Calcular valor_total a partir dos preços do estoque (se ainda não tiver)
-      let valorTotal = pedido.valor_total;
-      if (!valorTotal && pedido.itens_pedido?.length) {
-        const nomes = pedido.itens_pedido.map((i) => i.item).filter(Boolean);
-        const { data: estoqueItems } = await externalSupabase
-          .from("estoque")
-          .select("nome, preco")
-          .in("nome", nomes);
-        if (estoqueItems?.length) {
-          const precoMap: Record<string, number> = {};
-          estoqueItems.forEach((e) => { if (e.nome && e.preco != null) precoMap[e.nome] = e.preco; });
-          const total = pedido.itens_pedido.reduce((s, i) => s + (precoMap[i.item] ?? 0) * i.quantidade, 0);
-          if (total > 0) valorTotal = total;
-        }
-      }
-
-      // O status NÃO é mexido aqui de propósito.
-      // Escolher o entregador deixou de significar "saiu para entrega" na reforma
-      // de 03/08 — quem move o pedido para `saiu_para_entrega` é o próprio
-      // entregador, pelo botão do WhatsApp (WF5) ou pelo painel dele. O painel
-      // continuava pulando essa etapa e fechando a rua sozinho: o cliente recebia
-      // "saiu para entrega" antes de alguém sair, e o `saiu_em` do despacho ficava
-      // nulo. Quem põe o pedido em `em_separacao` é o `Desp_UpdateStatus` do n8n.
-      if (valorTotal && !pedido.valor_total) {
-        const { error: errPedido } = await externalSupabase
-          .from("pedidos")
-          .update({ valor_total: valorTotal })
-          .eq("id", pedido.id);
-        if (errPedido) throw new Error(errPedido.message);
-      }
-
-      // Decrementar estoque
-      if (pedido.itens_pedido?.length) {
-        for (const item of pedido.itens_pedido) {
-          if (!item.item || !item.quantidade) continue;
-          const { data: estoqueRow } = await externalSupabase
-            .from("estoque")
-            .select("id, quantidade")
-            .eq("nome", item.item)
-            .maybeSingle();
-          if (estoqueRow) {
-            await externalSupabase
-              .from("estoque")
-              .update({ quantidade: Math.max(0, (estoqueRow.quantidade ?? 0) - item.quantidade) })
-              .eq("id", estoqueRow.id);
-          }
-        }
-      }
-
-      if (selectedId) {
-        const despachoExistente = pedido.despacho_entrega?.[0];
-        if (despachoExistente) {
-          await externalSupabase
-            .from("despacho_entrega")
-            .update({ entregador_id: selectedId, saiu_em: null, chegou_em: null, status_entrega: "despachado" })
-            .eq("id", despachoExistente.id);
-        } else {
-          await externalSupabase.from("despacho_entrega").insert({
-            pedido_id: pedido.id,
-            entregador_id: selectedId,
-            status_entrega: "despachado",
-          });
-        }
-
-        // Aciona o MESMO workflow que o grupo Balcão aciona (Despacho_Motoboy).
-        //
-        // Antes o painel mandava a ficha por `send-text`, e texto puro não tem
-        // botão: o motoboy despachado pelo painel recebia um bilhete sem os
-        // botões "Sair para entrega → Cheguei → Entreguei" que o WF5 alimenta,
-        // enquanto o despachado pelo grupo recebia. Mesma mensagem, mesmo botão,
-        // mesma cadeia de status — a montagem continua morando só no n8n
-        // (`Desp_Montar_Msg`), e `fichaTexto()` no painel é o espelho dela para
-        // o botão "Copiar ficha".
-        //
-        // Só o entregador é avisado aqui. O cliente é avisado quando o entregador
-        // de fato sai — regra de 03/08.
-        try {
-          const r = await fetch("/api/despachar", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pedido_id: pedido.id, entregador_id: selectedId }),
-          });
-          if (!r.ok) {
-            const d = await r.json().catch(() => ({}));
-            throw new Error(`${r.status}${d?.error ? ` — ${d.error}` : ""}`);
-          }
-        } catch (e) {
-          toast({
-            title: "Entregador não foi avisado",
-            description: `O despacho foi salvo, mas o WhatsApp não saiu (${
-              e instanceof Error ? e.message : "erro"
-            }). Chame o entregador.`,
-            variant: "destructive",
-          });
-        }
-      }
-
-      toast({
-        title: "Entregador acionado!",
-        description: "Recebeu a ficha e os botões no WhatsApp. O pedido vai para a rua quando ele tocar em “Sair para entrega”.",
-      });
-      onDone();
-      onClose();
-
-      // Fire-and-forget: envia fotos dos produtos para o cliente
-      // Roda APÓS modal fechar, nunca bloqueia nem quebra o fluxo
-      const telefoneCliente2 = pedido.clientes?.telefone;
-      if (telefoneCliente2 && pedido.itens_pedido?.length) {
-        (async () => {
-          try {
-            const nomes2 = pedido.itens_pedido.map((i) => i.item).filter(Boolean);
-            const { data: imgs } = await externalSupabase
-              .from("estoque")
-              .select("nome, imagem_url")
-              .in("nome", nomes2)
-              .not("imagem_url", "is", null);
-            if (!imgs?.length) return;
-            const phone2 = telefoneCliente2.replace(/\D/g, "");
-            for (const img of imgs) {
-              if (!img.imagem_url) continue;
-              const item = pedido.itens_pedido.find((i) => i.item === img.nome);
-              const caption = item ? `${item.quantidade}x ${img.nome}` : img.nome;
-              await fetch("/api/notify-image", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ phone: phone2, image: img.imagem_url, caption }),
-              });
-            }
-          } catch { /* silently fail */ }
-        })();
-      }
-    } catch (err: unknown) {
-      toast({ title: "Erro ao despachar", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 flex-wrap">
-            {despachoExistenteInicial ? "Mudar entregador" : "Despachar pedido"}
-            <CodigoPedido codigo={pedidoNumero(pedido)} />
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Cliente: <span className="font-medium text-foreground">{pedido.clientes?.nome ?? "—"}</span>
-          </p>
-          {pedido.endereco && (
-            <p className="text-sm text-muted-foreground">
-              Endereço: <EnderecoLink endereco={pedido.endereco} icone={false} linhas={0} />
-            </p>
-          )}
-          {pedido.itens_pedido?.filter(i => i.item).length > 0 && (
-            <div className="bg-secondary rounded-lg px-3 py-2 text-sm space-y-0.5">
-              {pedido.itens_pedido.filter(i => i.item).map((i, idx) => (
-                <div key={idx} className="flex justify-between">
-                  <span>{i.item}</span>
-                  <span className="font-medium text-muted-foreground">×{i.quantidade}</span>
-                </div>
-              ))}
-              {pedido.valor_total != null && (
-                <div className="border-t border-border pt-1 mt-1 flex justify-between font-semibold">
-                  <span>Total</span><span>{formatCurrency(pedido.valor_total)}</span>
-                </div>
-              )}
-              {pedido.pagamento && (
-                <p className="text-xs text-muted-foreground pt-0.5">Pgto: {pedido.pagamento}</p>
-              )}
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label>Entregador (opcional)</Label>
-            <Select value={selectedId} onValueChange={setSelectedId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar entregador..." />
-              </SelectTrigger>
-              <SelectContent>
-                {entregadores.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>{e.nome}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={confirmar} disabled={loading}>
-            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Truck className="w-4 h-4 mr-2" />}
-            Despachar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ─── OrderCard ────────────────────────────────────────────────────────────────
 
 function OrderCard({
@@ -532,7 +304,7 @@ function OrderCard({
   p: Pedido;
   col: ColConfig;
   entregadores: EntregadorFull[];
-  onStatusChange: (id: string, newStatus: string) => Promise<void>;
+  onStatusChange: (id: string, newStatus: string, motivo?: string) => Promise<void>;
   onDespachar: (pedido: Pedido) => void;
   onAbrirFicha: (pedido: Pedido) => void;
   readOnly?: boolean;
@@ -548,6 +320,7 @@ function OrderCard({
   // Cancelar é irreversível pela tela e o botão fica colado no "avançar status":
   // sem esta confirmação, um toque errado tirava o pedido da fila sem aviso nenhum.
   const [confirmarCancelar, setConfirmarCancelar] = useState(false);
+  const [motivoCancelamento, setMotivoCancelamento] = useState("");
   const canCancel = p.status ? CANCELABLE.includes(p.status) : false;
 
   // Para em_separacao e saiu_para_entrega mostramos botões customizados
@@ -560,9 +333,9 @@ function OrderCard({
   };
   const next = p.status ? NEXT_NORMAL[p.status] ?? null : null;
 
-  async function advance(newStatus: string) {
+  async function advance(newStatus: string, motivo?: string) {
     setUpdating(true);
-    await onStatusChange(p.id, newStatus);
+    await onStatusChange(p.id, newStatus, motivo);
     setUpdating(false);
   }
 
@@ -719,10 +492,13 @@ function OrderCard({
                 <X className="w-5 h-5" />
               </button>
 
-              <AlertDialog open={confirmarCancelar} onOpenChange={setConfirmarCancelar}>
+              <AlertDialog
+                open={confirmarCancelar}
+                onOpenChange={(v) => { setConfirmarCancelar(v); if (!v) setMotivoCancelamento(""); }}
+              >
                 <AlertDialogContent onClick={pararPropagacao}>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Cancelar o pedido {pedidoNumero(p)}?</AlertDialogTitle>
+                    <AlertDialogTitle>Cancelar o pedido {pedidoNumero(p)}? Por quê?</AlertDialogTitle>
                     <AlertDialogDescription>
                       {nome}
                       {itens.length ? ` · ${itens.length} ${itens.length === 1 ? "item" : "itens"}` : ""}
@@ -731,11 +507,13 @@ function OrderCard({
                       O pedido sai da fila do balcão e não dá para desfazer por aqui.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
+                  <MotivoCancelamento value={motivoCancelamento} onChange={setMotivoCancelamento} />
                   <AlertDialogFooter>
                     <AlertDialogCancel>Voltar</AlertDialogCancel>
                     <AlertDialogAction
-                      onClick={() => advance("cancelado")}
-                      className="bg-status-cancelado text-white hover:bg-status-cancelado/90"
+                      onClick={() => advance("cancelado", motivoCancelamento)}
+                      disabled={!motivoCancelamento.trim()}
+                      className="bg-status-cancelado text-white hover:bg-status-cancelado/90 disabled:opacity-50"
                     >
                       Cancelar pedido
                     </AlertDialogAction>
@@ -761,7 +539,7 @@ function NaRuaCard({
 }: {
   p: Pedido;
   entregadores: EntregadorFull[];
-  onConfirmarEntrega: (id: string) => Promise<void>;
+  onConfirmarEntrega: (id: string) => Promise<boolean>;
   onAbrirFicha: (pedido: Pedido) => void;
   readOnly?: boolean;
 }) {
@@ -779,8 +557,10 @@ function NaRuaCard({
   async function handleConfirmar() {
     setConfirming(true);
     try {
-      await onConfirmarEntrega(p.id);
-      toast({ title: "Entrega confirmada!" });
+      // false = abriu o modal de pagamento, ainda não confirmou de fato —
+      // o toast de sucesso sai de lá quando o balcão terminar.
+      const confirmou = await onConfirmarEntrega(p.id);
+      if (confirmou) toast({ title: "Entrega confirmada!" });
     } catch {
       toast({ title: "Erro ao confirmar", variant: "destructive" });
     } finally {
@@ -943,14 +723,24 @@ export default function Pedidos() {
   // tela achando que sumiram os pedidos de ontem que ainda estão na rua.
   const [busca, setBusca] = useState("");
   const [dia, setDia] = useState<string | null>(null);
-  // `?aba=conversas` existe para a rota antiga /conversas continuar levando ao
-  // lugar certo — o item saiu do menu e virou aba daqui.
+  // Conversas saiu daqui e voltou a ser tela própria (/conversas), na seção
+  // Atendimento — ver [AppLayout]. Quem chegar pelo link antigo `?aba=conversas`
+  // é levado para lá em vez de cair num Kanban sem explicação.
   const [searchParams] = useSearchParams();
-  const [aba, setAba] = useState<"kanban" | "na_rua" | "agendados" | "historico" | "conversas">(
-    searchParams.get("aba") === "conversas" ? "conversas" : "kanban",
-  );
+  const navigate = useNavigate();
+  const operador = useOperador();
+  const [aba, setAba] = useState<"kanban" | "na_rua" | "agendados" | "historico">("kanban");
+
+  useEffect(() => {
+    if (searchParams.get("aba") === "conversas") navigate("/conversas", { replace: true });
+  }, [searchParams, navigate]);
   const [agendados, setAgendados] = useState<PedidoAgendado[]>([]);
   const [despacharPedido, setDespacharPedido] = useState<Pedido | null>(null);
+  // Confirmar entrega pelo balcão (Kanban ou "Na rua") sem o entregador ter
+  // registrado nada ainda em `despacho_entrega` — abre este modal em vez de
+  // fechar o pedido sem saber como foi pago.
+  const [pagamentoPendente, setPagamentoPendente] = useState<Pedido | null>(null);
+  const [confirmandoPagamento, setConfirmandoPagamento] = useState(false);
   const [novoPedido, setNovoPedido] = useState(false);
   // Ficha aberta: guardamos só o id para o card seguir vivo nos refreshes de 30s
   const [fichaId, setFichaId] = useState<string | null>(null);
@@ -981,25 +771,6 @@ export default function Pedidos() {
     setAgendados((agendadosData as unknown as PedidoAgendado[]) ?? []);
     setLoading(false);
     setRefreshing(false);
-  }
-
-  // Falha de WhatsApp precisa aparecer na tela: foi o `catch {}` mudo aqui que
-  // escondeu por semanas uma instância Z-API morta. Mesma regra do painel do entregador.
-  async function notifyWhatsApp(phone: string, message: string) {
-    try {
-      const r = await fetch("/api/notify-client", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone.replace(/\D/g, ""), message }),
-      });
-      if (!r.ok) throw new Error(String(r.status));
-    } catch {
-      toast({
-        title: "Cliente não foi avisado",
-        description: "O status foi salvo, mas o WhatsApp não saiu.",
-        variant: "destructive",
-      });
-    }
   }
 
   /**
@@ -1080,15 +851,18 @@ export default function Pedidos() {
   }
 
   /**
-   * Libera o agendado para o cliente confirmar.
+   * Envia a confirmação para o cliente — agora, não no próximo tique.
    *
-   * Só marca `liberado_em`. Quem monta e envia os botões é o
-   * WF_Agendamento_Liberar (checa estoque, desvia para revisão manual quando
-   * falta item, manda o option-list e grava `confirmacao_enviada_em`) — o painel
-   * escrever a mensagem aqui seria a quarta cópia de regra do n8n neste arquivo.
+   * Marca `liberado_em` (o portão que o WF_Agendamento_Liberar respeita) e em
+   * seguida cutuca o webhook `agendamento-liberar`, que entra no MESMO fluxo do
+   * Schedule: checa estoque, desvia para revisão manual quando falta item, manda
+   * o option-list e grava `confirmacao_enviada_em`. O painel continua não
+   * escrevendo a mensagem — seria a quarta cópia de regra do n8n neste arquivo.
    *
-   * Custo aceito: o envio sai no próximo tique de 5 min. O card avisa isso na
-   * tela para ninguém clicar duas vezes achando que falhou.
+   * Antes só marcava `liberado_em` e o envio saía em até 5 minutos, o que fazia
+   * o balcão clicar de novo achando que tinha falhado. O Schedule segue ativo
+   * como rede de segurança: se o disparo imediato falhar, o tique pega depois —
+   * por isso a falha aqui é um aviso, não um erro que desfaz a liberação.
    */
   async function liberarAgendado(a: PedidoAgendado) {
     const agora = new Date().toISOString();
@@ -1106,40 +880,83 @@ export default function Pedidos() {
       return;
     }
     setAgendados((prev) => prev.map((x) => (x.id === a.id ? { ...x, liberado_em: agora } : x)));
-    toast({
-      title: "Liberado para o cliente",
-      description: "Ele recebe os botões de confirmar/cancelar no WhatsApp em até 5 minutos.",
-    });
+
+    try {
+      const r = await fetch("/api/agendamento-liberar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agendado_id: a.id }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      toast({
+        title: "Confirmação enviada!",
+        description: "O cliente já recebeu os botões de confirmar/cancelar no WhatsApp.",
+      });
+    } catch {
+      toast({
+        title: "Liberado, mas o envio imediato falhou",
+        description: "O cliente ainda recebe no próximo ciclo automático (até 5 min).",
+      });
+    }
+    setTimeout(() => load(true), 2500);
   }
 
-  async function handleStatusChange(id: string, newStatus: string) {
+  async function handleStatusChange(id: string, newStatus: string, motivo?: string) {
     // O card do Kanban também tem "Confirmar Entrega" (NEXT_NORMAL.saiu_para_entrega).
     // Sem este desvio ele fechava o pedido por fora: sem avisar o cliente e sem baixar
     // o despacho_entrega — só a aba "Na rua" fazia certo, com o mesmo rótulo de botão.
     if (newStatus === "entregue") {
-      await handleConfirmarEntrega(id);
+      await iniciarConfirmarEntrega(id);
       return;
     }
-    await externalSupabase.from("pedidos").update({ status: newStatus }).eq("id", id);
+    // Toda mudança feita na mão carimba quem fez: é o que separa o que a Maria
+    // fechou sozinha do que o balcão moveu.
+    const patch: Record<string, unknown> = { status: newStatus, ...operador };
+    if (newStatus === "cancelado" && motivo) patch.motivo_cancelamento = motivo;
+    await externalSupabase.from("pedidos").update(patch).eq("id", id);
     setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
   }
 
-  async function handleConfirmarEntrega(id: string) {
+  /**
+   * Se o entregador já registrou o pagamento pelo celular dele
+   * (`despacho_entrega.pagamento_recebido`), confirma direto — perguntar de
+   * novo só atrapalharia. Senão, abre o modal para o balcão registrar antes
+   * de fechar o pedido. Retorna `true` quando já confirmou nesta chamada —
+   * os cards usam isso para não mostrar "Entrega confirmada!" cedo demais,
+   * enquanto o modal ainda está esperando o balcão preencher.
+   */
+  async function iniciarConfirmarEntrega(id: string): Promise<boolean> {
     const pedido = pedidos.find((p) => p.id === id);
-    const despacho = pedido?.despacho_entrega?.[0];
-    await externalSupabase.from("pedidos").update({ status: "entregue" }).eq("id", id);
-    if (despacho) {
-      await externalSupabase
-        .from("despacho_entrega")
-        .update({ status_entrega: "entregue", chegou_em: new Date().toISOString() })
-        .eq("id", despacho.id);
+    if (!pedido) return false;
+    if (pagamentoJaRegistrado(pedido)) {
+      await handleConfirmarEntrega(id);
+      return true;
     }
-    setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status: "entregue" } : p)));
+    setPagamentoPendente(pedido);
+    return false;
+  }
 
-    const telefoneCliente = pedido?.clientes?.telefone;
-    if (telefoneCliente) {
-      notifyWhatsApp(telefoneCliente, "✅ Chegou!");
+  async function handleConfirmarEntrega(id: string, pagamentos?: ItemPagamento[]) {
+    const pedido = pedidos.find((p) => p.id === id);
+    if (!pedido) return;
+    const { avisouCliente } = await confirmarEntregaPedido(pedido, pagamentos ?? null, operador);
+    setPedidos((prev) => prev.map((p) => (p.id === id ? { ...p, status: "entregue" } : p)));
+    if (!avisouCliente) {
+      toast({
+        title: "Cliente não foi avisado",
+        description: "O status foi salvo, mas o WhatsApp não saiu.",
+        variant: "destructive",
+      });
     }
+  }
+
+  async function confirmarComPagamento(pagamentos: ItemPagamento[]) {
+    if (!pagamentoPendente) return;
+    setConfirmandoPagamento(true);
+    await handleConfirmarEntrega(pagamentoPendente.id, pagamentos);
+    setConfirmandoPagamento(false);
+    setPagamentoPendente(null);
+    toast({ title: "Entrega confirmada!" });
   }
 
   useEffect(() => {
@@ -1169,18 +986,8 @@ export default function Pedidos() {
   // trabalho parado, não pode sumir só porque o balcão filtrou por "hoje".
   const agendadosPendentes = agendados.filter((a) => AGENDADO_PENDENTES.includes(a.status)).length;
 
-  // Mesma queryKey que a aba Conversas usa: o react-query serve as duas do mesmo
-  // cache, então isto não é uma segunda ida ao banco. Serve para o badge — sem o
-  // item no menu lateral, é o que avisa que tem cliente esperando o balcão.
-  const { data: conversasRows } = useQuery({
-    queryKey: ["conversas"],
-    queryFn: fetchConversas,
-    refetchInterval: 20_000,
-    enabled: !readOnly,
-  });
-  const conversasComBalcao = agruparPorTelefone(conversasRows ?? []).filter(
-    (g) => statusPausa(g.principal.estado, g.principal.pausada_ate).pausada,
-  ).length;
+  // O contador de conversas em espera saiu daqui junto com a aba: agora vive no
+  // item "Conversas" da sidebar (AppLayout), que é onde o balcão vai clicar.
   // Cards e ficha usam a lista toda (pedido antigo pode ter entregador já desativado);
   // só o despacho oferece exclusivamente quem está ativo.
   const entregadoresAtivos = entregadores.filter((e) => e.ativo);
@@ -1241,34 +1048,6 @@ export default function Pedidos() {
             Kanban
           </button>
 
-          {/* Conversas vem logo depois do Kanban e com peso visual próprio: era
-              item do menu lateral e, virando só mais uma aba cinza no meio da
-              fileira, ninguém olhava — é aqui que se vê o cliente esperando
-              resposta do balcão. Com gente na espera, fica âmbar e pulsa. */}
-          {!readOnly && (
-            <button
-              onClick={() => setAba("conversas")}
-              className={cn(
-                "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border",
-                aba === "conversas"
-                  ? "bg-status-rua text-white border-transparent"
-                  : conversasComBalcao > 0
-                    ? "bg-status-rua/10 text-status-ink-rua border-status-rua/40"
-                    : "bg-card text-foreground border-border hover:bg-secondary",
-              )}
-            >
-              <MessagesSquare className="w-4 h-4" />
-              Conversas
-              {conversasComBalcao > 0 && (
-                <span className={cn(
-                  "px-1.5 py-0.5 rounded-full text-xs font-bold",
-                  aba === "conversas" ? "bg-white/20 text-white" : "bg-status-rua text-white animate-pulse",
-                )}>
-                  {conversasComBalcao}
-                </span>
-              )}
-            </button>
-          )}
           <button
             onClick={() => setAba("na_rua")}
             className={cn(
@@ -1287,11 +1066,17 @@ export default function Pedidos() {
               </span>
             )}
           </button>
+          {/* Com pendência, a aba ganha borda e fundo âmbar em vez de ficar cinza
+              no meio da fileira — é trabalho parado que ninguém vê no Kanban. */}
           <button
             onClick={() => setAba("agendados")}
             className={cn(
-              "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
-              aba === "agendados" ? "bg-status-separacao text-white" : "text-muted-foreground hover:bg-secondary"
+              "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border",
+              aba === "agendados"
+                ? "bg-status-separacao text-white border-transparent"
+                : agendadosPendentes > 0
+                  ? "bg-status-separacao/10 text-status-ink-separacao border-status-separacao/40"
+                  : "text-muted-foreground border-transparent hover:bg-secondary",
             )}
           >
             <AlarmClock className="w-4 h-4" />
@@ -1299,7 +1084,7 @@ export default function Pedidos() {
             {agendadosPendentes > 0 && (
               <span className={cn(
                 "px-1.5 py-0.5 rounded-full text-xs font-bold",
-                aba === "agendados" ? "bg-white/20 text-white" : "bg-status-separacao text-white"
+                aba === "agendados" ? "bg-white/20 text-white" : "bg-status-separacao text-white animate-pulse"
               )}>
                 {agendadosPendentes}
               </span>
@@ -1317,9 +1102,8 @@ export default function Pedidos() {
           </button>
         </div>
 
-        {/* Busca + dia — valem para as abas de pedido. Conversas tem a própria
-            busca (por nome/telefone) e não conhece dia nem status. */}
-        <div className={cn("mt-3 space-y-2", aba === "conversas" && "hidden")}>
+        {/* Busca + dia — valem para todas as abas de pedido. */}
+        <div className="mt-3 space-y-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
             <input
@@ -1357,6 +1141,31 @@ export default function Pedidos() {
       {/* ── ABA KANBAN ── */}
       {aba === "kanban" && (
         <>
+          {/* Agendado é o único trabalho que NÃO aparece no Kanban: fica numa aba
+              ao lado e some da vista. Já aconteceu de pedido agendado dormir a
+              manhã inteira esperando alguém lembrar de abrir a aba. Este aviso é
+              a ponte — some sozinho quando não há pendência. */}
+          {agendadosPendentes > 0 && (
+            <button
+              onClick={() => setAba("agendados")}
+              className="mx-4 mt-3 flex w-[calc(100%-2rem)] items-center gap-2.5 rounded-xl border border-status-separacao/40 bg-status-separacao/10 px-3 py-2.5 text-left transition-colors hover:bg-status-separacao/20"
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-status-separacao text-white">
+                <AlarmClock className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold text-status-ink-separacao">
+                  {agendadosPendentes}{" "}
+                  {agendadosPendentes === 1 ? "pedido agendado esperando" : "pedidos agendados esperando"}
+                </span>
+                <span className="block text-xs text-status-ink-separacao/80">
+                  Toque para abrir e enviar a confirmação ao cliente
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-status-ink-separacao" />
+            </button>
+          )}
+
           {/* Filtros */}
           <div className="px-4 pb-3 pt-3 flex flex-wrap gap-2">
             {COLUNAS.map((col) => (
@@ -1431,7 +1240,7 @@ export default function Pedidos() {
                   key={p.id}
                   p={p}
                   entregadores={entregadores}
-                  onConfirmarEntrega={handleConfirmarEntrega}
+                  onConfirmarEntrega={iniciarConfirmarEntrega}
                   onAbrirFicha={(pedido) => setFichaId(pedido.id)}
                   readOnly={readOnly}
                 />
@@ -1454,13 +1263,6 @@ export default function Pedidos() {
             onLiberar={readOnly ? undefined : liberarAgendado}
             onCancelar={readOnly ? undefined : cancelarAgendado}
           />
-        </div>
-      )}
-
-      {/* ── ABA CONVERSAS ── */}
-      {aba === "conversas" && !readOnly && (
-        <div className="flex-1 overflow-y-auto">
-          <Conversas embutido />
         </div>
       )}
 
@@ -1492,6 +1294,14 @@ export default function Pedidos() {
                   <div className="space-y-2 mt-1.5">
               {doDia.map((p) => {
                 const cfg = statusConfig(p.status);
+                // Quem levou. O despacho guarda só o id; o nome vem da lista de
+                // entregadores (que inclui os desativados, senão pedido antigo
+                // ficaria sem nome nenhum).
+                const despachoHist = p.despacho_entrega?.[0] ?? null;
+                const entregadorHist = despachoHist?.entregador_id
+                  ? entregadores.find((e) => e.id === despachoHist.entregador_id) ?? null
+                  : null;
+                const telHist = formatPhone(p.clientes?.telefone);
                 return (
                   <button
                     key={p.id}
@@ -1507,12 +1317,36 @@ export default function Pedidos() {
                         <p className="text-sm font-semibold text-foreground truncate">
                           {p.clientes?.nome ?? p.clientes?.telefone ?? "—"}
                         </p>
+                        {/* O nome sozinho não identifica: há homônimo e há cliente
+                            salvo só pelo telefone. */}
+                        {p.clientes?.nome && telHist && (
+                          <span className="text-xs text-muted-foreground shrink-0">{telHist}</span>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                         <Clock className="w-3 h-3" />
                         {/* Só a hora: o dia já está no cabeçalho do grupo. */}
                         {p.created_at ? format(new Date(p.created_at), "HH:mm", { locale: ptBR }) : "—"}
                       </p>
+                      {/* Endereço e entregador: sem eles, achar "o pedido daquela
+                          rua" ou "o que fulano levou" obrigava a abrir um por um. */}
+                      {p.tipo_fulfillment === "retirada" ? (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Package className="w-3 h-3 shrink-0" />
+                          Retirada na loja
+                        </p>
+                      ) : p.endereco ? (
+                        <p className="mt-0.5 flex items-start gap-1 text-xs text-muted-foreground">
+                          <Navigation className="w-3 h-3 shrink-0 mt-0.5" />
+                          <span className="line-clamp-1">{p.endereco}</span>
+                        </p>
+                      ) : null}
+                      {entregadorHist && (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Truck className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{entregadorHist.nome}</span>
+                        </p>
+                      )}
                     </div>
                     <div className="text-right shrink-0 space-y-1">
                       {p.valor_total != null && (
@@ -1561,6 +1395,16 @@ export default function Pedidos() {
           onDone={() => load(true)}
         />
       )}
+
+      <ConfirmarPagamentoModal
+        open={!!pagamentoPendente}
+        onClose={() => setPagamentoPendente(null)}
+        valorEsperado={pagamentoPendente?.valor_total}
+        pending={confirmandoPagamento}
+        onConfirmar={confirmarComPagamento}
+        titulo="Como foi pago?"
+        confirmLabel="Confirmar entrega"
+      />
     </div>
   );
 }

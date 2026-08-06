@@ -50,7 +50,11 @@ function horaCurta(iso: string | null) {
   });
 }
 
-export default function EntregaToggle({ variant = "sidebar" }: { variant?: "sidebar" | "mobile" }) {
+export default function EntregaToggle({
+  variant = "sidebar",
+}: {
+  variant?: "sidebar" | "mobile" | "compacto";
+}) {
   const { role } = useAuth();
   const [cfg, setCfg] = useState<ConfigEntrega | null>(null);
   const [salvando, setSalvando] = useState(false);
@@ -115,17 +119,47 @@ export default function EntregaToggle({ variant = "sidebar" }: { variant?: "side
       <div
         className={cn(
           "flex items-center justify-center gap-2 rounded-2xl border border-dashed text-xs font-semibold",
-          variant === "sidebar"
-            ? "mx-3 mb-1 h-[92px] border-sidebar-border text-sidebar-foreground/60"
-            : "h-[62px] shrink-0 px-4 border-border text-muted-foreground"
+          variant === "sidebar" && "mx-3 mb-1 h-[92px] border-sidebar-border text-sidebar-foreground/60",
+          variant === "compacto" && "mx-3 mb-1 h-8 border-sidebar-border text-sidebar-foreground/60",
+          variant === "mobile" && "h-[62px] shrink-0 px-4 border-border text-muted-foreground"
         )}
       >
-        {erro ? "entrega: indisponível" : <Loader2 className="w-4 h-4 animate-spin" />}
+        {erro ? "entrega: —" : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
       </div>
     );
   }
 
   const Icone = ligado ? Bike : Store;
+
+  if (variant === "compacto") {
+    return (
+      <button
+        type="button"
+        onClick={alternar}
+        disabled={!podeMexer || salvando}
+        aria-pressed={ligado}
+        title={podeMexer ? "Ligar/desligar entrega" : "Somente o balcão altera a entrega"}
+        className={cn(
+          "mx-3 mb-1 flex w-[calc(100%-1.5rem)] items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-colors",
+          "text-sidebar-foreground hover:bg-sidebar-accent/50",
+          (!podeMexer || salvando) && "opacity-70"
+        )}
+      >
+        {salvando
+          ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+          : <Icone className="w-3.5 h-3.5 shrink-0" />}
+        <span className="truncate">Entrega</span>
+        <span
+          className={cn(
+            "ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-extrabold",
+            ligado ? "bg-[hsl(var(--money))] text-white" : "bg-[hsl(var(--destructive))] text-white"
+          )}
+        >
+          {ligado ? "ON" : "OFF"}
+        </span>
+      </button>
+    );
+  }
 
   const legenda = ligado
     ? "Toque para pausar"

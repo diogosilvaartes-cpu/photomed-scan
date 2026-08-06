@@ -66,20 +66,6 @@ async function fetchDespachosMetrica(): Promise<DespachoMetrica[]> {
   return (data ?? []) as unknown as DespachoMetrica[];
 }
 
-function minutosEntre(inicio: string | null, fim: string | null) {
-  if (!inicio || !fim) return null;
-  return (new Date(fim).getTime() - new Date(inicio).getTime()) / 60000;
-}
-
-function duracaoCurta(min: number | null) {
-  if (min == null) return "—";
-  if (min < 1) return "<1min";
-  if (min < 60) return `${Math.floor(min)}min`;
-  const h = Math.floor(min / 60);
-  const m = Math.floor(min % 60);
-  return m ? `${h}h${m}` : `${h}h`;
-}
-
 function metricasDe(entregadorId: string, despachos: DespachoMetrica[]) {
   const meus = despachos.filter((d) => d.entregador_id === entregadorId);
   const entregues = meus.filter((d) => d.entregue_em);
@@ -91,11 +77,6 @@ function metricasDe(entregadorId: string, despachos: DespachoMetrica[]) {
     return !d.entregue_em && d.status_entrega !== "entregue";
   });
 
-  const tempos = entregues
-    .map((d) => minutosEntre(d.saiu_em, d.entregue_em))
-    .filter((t): t is number => t != null && t >= 0);
-  const tempoMedio = tempos.length ? tempos.reduce((s, t) => s + t, 0) / tempos.length : null;
-
   const recebido = entregues.reduce(
     (s, d) => s + (d.pagamento_recebido ?? []).reduce((x, p) => x + (Number(p.valor) || 0), 0),
     0,
@@ -105,7 +86,6 @@ function metricasDe(entregadorId: string, despachos: DespachoMetrica[]) {
     total: entregues.length,
     entreguesHoje: entreguesHoje.length,
     emAndamento: emAndamento.length,
-    tempoMedio,
     recebido,
   };
 }
@@ -378,7 +358,7 @@ function ListaEquipe({ funcao, despachos }: { funcao: Funcao; despachos: Despach
             </div>
 
             {metricas && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+              <div className="grid grid-cols-3 gap-2 mt-3">
                 <div className="bg-secondary/60 rounded-lg px-2.5 py-1.5">
                   <p className="text-[10px] text-muted-foreground">Entregues</p>
                   <p className="text-sm font-bold">{metricas.total}</p>
@@ -386,10 +366,6 @@ function ListaEquipe({ funcao, despachos }: { funcao: Funcao; despachos: Despach
                 <div className="bg-secondary/60 rounded-lg px-2.5 py-1.5">
                   <p className="text-[10px] text-muted-foreground">Hoje</p>
                   <p className="text-sm font-bold">{metricas.entreguesHoje}</p>
-                </div>
-                <div className="bg-secondary/60 rounded-lg px-2.5 py-1.5">
-                  <p className="text-[10px] text-muted-foreground">Tempo médio</p>
-                  <p className="text-sm font-bold">{duracaoCurta(metricas.tempoMedio)}</p>
                 </div>
                 <div className="bg-secondary/60 rounded-lg px-2.5 py-1.5">
                   <p className="text-[10px] text-muted-foreground">Recebido</p>

@@ -5,7 +5,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   Truck, History, Loader2, MapPin, Phone, Navigation,
-  Clock, CheckCircle, AlertTriangle, Radio, Package, TrendingUp, Search,
+  Clock, CheckCircle, AlertTriangle, Radio, Package, Search,
   LocateFixed, Camera, DollarSign, PackageCheck,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -565,17 +565,12 @@ export function AbaHistorico({ despachos, entregadores }: {
   const entregues = finalizados.filter((d) => d.entregue_em);
   const cancelados = finalizados.filter((d) => !d.entregue_em && d.pedidos?.status === "cancelado");
   const faturado = entregues.reduce((s, d) => s + totalRecebido(d.pagamento_recebido), 0);
-  const tempos = entregues
-    .map((d) => minutosEntre(d.saiu_em, d.entregue_em))
-    .filter((t): t is number => t != null && t >= 0);
-  const tempoMedio = tempos.length ? tempos.reduce((s, t) => s + t, 0) / tempos.length : null;
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <Kpi icon={<CheckCircle className="w-3.5 h-3.5" />} label="Entregues" valor={String(entregues.length)} destaque="text-green-600" />
         <Kpi icon={<Package className="w-3.5 h-3.5" />} label="Cancelados" valor={String(cancelados.length)} destaque={cancelados.length ? "text-red-600" : undefined} />
-        <Kpi icon={<TrendingUp className="w-3.5 h-3.5" />} label="Tempo médio" valor={duracaoCurta(tempoMedio)} />
         <Kpi icon={<DollarSign className="w-3.5 h-3.5" />} label="Recebido" valor={brl(faturado)} destaque={moneyClass(faturado)} />
       </div>
 

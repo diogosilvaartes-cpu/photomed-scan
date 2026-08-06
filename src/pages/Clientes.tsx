@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, User, Phone, MapPin, ShoppingBag, MessageSquare,
-  ChevronRight, Loader2, Plus, X, Camera, Navigation
+  ChevronRight, Loader2, Plus, X, Camera, Navigation, Bot, BotOff, Truck, PackageCheck
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -16,11 +16,22 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { brl } from "@/lib/status";
-import { fotoWhatsApp } from "@/lib/pedido";
+import {
+  fotoWhatsApp, mapsLink, PEDIDO_SELECT,
+  type Pedido as PedidoCompleto, type EntregadorFull, type ItemPagamento,
+} from "@/lib/pedido";
+import { confirmarEntregaPedido, pagamentoJaRegistrado } from "@/lib/confirmarEntrega";
+import { useOperador } from "@/lib/operador";
+import { cn } from "@/lib/utils";
 import FichaPedidoPorId from "@/components/FichaPedidoPorId";
 import EnderecoLink from "@/components/EnderecoLink";
+import DespacharModal from "@/components/DespacharModal";
+import ConfirmarPagamentoModal from "@/components/ConfirmarPagamentoModal";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+
+/** Status em que o pedido ainda pede alguma ação do balcão. */
+const STATUS_ATIVOS = ["novo", "em_separacao", "saiu_para_entrega"];
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   novo: { label: "Novo", color: "bg-status-novo/15 text-status-ink-novo" },
@@ -41,14 +52,18 @@ type Cliente = {
   observacoes: string | null;
   anotacoes_entregador: string | null;
   created_at: string;
+  /** false = a Maria foi desligada para este cliente no painel; só humano atende. */
+  maria_ativa: boolean | null;
 };
 
-type EnderecoGPS = {
+type EnderecoCliente = {
   id: string;
   label_exibicao: string | null;
   rua: string | null;
   latitude: number | null;
   longitude: number | null;
+  referencia: string | null;
+  principal: boolean | null;
 };
 
 
@@ -71,12 +86,21 @@ async function fetchClientes(search: string): Promise<Cliente[]> {
   return data ?? [];
 }
 
-async function fetchEnderecosGPS(clienteId: string): Promise<EnderecoGPS[]> {
+/**
+ * TODOS os endereços cadastrados do cliente — não só os que já têm coordenada.
+ *
+ * Antes esta query filtrava `latitude is not null` e o resultado aparecia numa
+ * lista separada, embaixo dos endereços em texto de `clientes.enderecos[]`. O
+ * mesmo endereço saía duas vezes (uma como texto morto, outra como link de GPS)
+ * e não dava para saber qual localização pertencia a qual endereço. Agora a
+ * tabela `enderecos` é a fonte, cada linha carrega a SUA coordenada, e o texto
+ * legado só entra para o que ainda não foi cadastrado.
+ */
+async function fetchEnderecosCliente(clienteId: string): Promise<EnderecoCliente[]> {
   const { data, error } = await externalSupabase
     .from("enderecos")
-    .select("id, label_exibicao, rua, latitude, longitude")
-    .eq("cliente_id", clienteId)
-    .not("latitude", "is", null);
+    .select("id, label_exibicao, rua, latitude, longitude, referencia, principal")
+    .eq("cliente_id", clienteId);
   if (error) throw error;
   return data ?? [];
 }
@@ -142,10 +166,133 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
     enabled: !!cliente?.id && open,
   });
 
-  const { data: enderecosGPS } = useQuery({
-    queryKey: ["enderecos-gps", cliente?.id],
-    queryFn: () => fetchEnderecosGPS(cliente!.id),
+  const { data: enderecosCad } = useQuery({
+    queryKey: ["enderecos-cliente", cliente?.id],
+    queryFn: () => fetchEnderecosCliente(cliente!.id),
     enabled: !!cliente?.id && open,
+  });
+
+  const operador = useOperador();
+
+  /**
+   * Botão dinâmico do pedido em andamento: Iniciar Separação → Despachar →
+   * Confirmar Entrega, o mesmo trio que existe no Kanban de Pedidos. Reusa
+   * as mesmas peças de lá (`DespacharModal`, `confirmarEntregaPedido`) em vez
+   * de reimplementar — essas regras já divergiram entre telas antes.
+   */
+  const pedidoAtivoResumo = pedidos?.find((p) => STATUS_ATIVOS.includes(p.status)) ?? null;
+
+  const { data: pedidoAtivo } = useQuery({
+    queryKey: ["pedido-ativo-completo", pedidoAtivoResumo?.id],
+    queryFn: async () => {
+      const { data, error } = await externalSupabase
+        .from("pedidos")
+        .select(PEDIDO_SELECT)
+        .eq("id", pedidoAtivoResumo!.id)
+        .single();
+      if (error) throw error;
+      return data as unknown as PedidoCompleto;
+    },
+    enabled: !!pedidoAtivoResumo?.id && open,
+  });
+
+  const { data: entregadoresAtivos } = useQuery({
+    queryKey: ["entregadores-ativos"],
+    queryFn: async () => {
+      const { data, error } = await externalSupabase.from("entregadores").select("*").eq("ativo", true);
+      if (error) throw error;
+      return (data ?? []) as EntregadorFull[];
+    },
+    enabled: open && pedidoAtivoResumo?.status === "em_separacao",
+  });
+
+  const [iniciandoSeparacao, setIniciandoSeparacao] = useState(false);
+  const [despachando, setDespachando] = useState(false);
+  const [pagamentoPendente, setPagamentoPendente] = useState(false);
+  const [confirmandoPagamento, setConfirmandoPagamento] = useState(false);
+
+  function refetchPedidoDoCliente() {
+    qc.invalidateQueries({ queryKey: ["pedidos-cliente", cliente!.id] });
+    qc.invalidateQueries({ queryKey: ["pedido-ativo-completo"] });
+  }
+
+  async function iniciarSeparacao() {
+    if (!pedidoAtivoResumo) return;
+    setIniciandoSeparacao(true);
+    const { error } = await externalSupabase
+      .from("pedidos")
+      .update({ status: "em_separacao", ...operador })
+      .eq("id", pedidoAtivoResumo.id);
+    setIniciandoSeparacao(false);
+    if (error) {
+      toast({ title: "Não deu para iniciar a separação", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Separação iniciada" });
+    refetchPedidoDoCliente();
+  }
+
+  async function confirmarEntregaAgora(pagamentos: ItemPagamento[] | null) {
+    if (!pedidoAtivo) return;
+    setConfirmandoPagamento(true);
+    const { avisouCliente } = await confirmarEntregaPedido(pedidoAtivo, pagamentos, operador);
+    setConfirmandoPagamento(false);
+    setPagamentoPendente(false);
+    refetchPedidoDoCliente();
+    toast({ title: "Entrega confirmada!" });
+    if (!avisouCliente) {
+      toast({
+        title: "Cliente não foi avisado",
+        description: "O status foi salvo, mas o WhatsApp não saiu.",
+        variant: "destructive",
+      });
+    }
+  }
+
+  function acionarBotaoPedido() {
+    if (!pedidoAtivoResumo) return;
+    if (pedidoAtivoResumo.status === "novo") { iniciarSeparacao(); return; }
+    if (pedidoAtivoResumo.status === "em_separacao") { setDespachando(true); return; }
+    if (pedidoAtivoResumo.status === "saiu_para_entrega") {
+      if (pedidoAtivo && pagamentoJaRegistrado(pedidoAtivo)) confirmarEntregaAgora(null);
+      else setPagamentoPendente(true);
+    }
+  }
+
+  /**
+   * Desligar a Maria para ESTE cliente — permanente, não é o handoff de 2h.
+   *
+   * Serve para o cliente que não se entende com o robô, o que só quer falar com
+   * gente, e o problemático que o balcão prefere atender na mão. Enquanto estiver
+   * desligada, a mensagem dele continua sendo registrada (o balcão vê na aba
+   * Conversas), mas a Maria não responde nada.
+   *
+   * Pede confirmação porque ninguém percebe que desligou por engano: o sintoma é
+   * um cliente que simplesmente para de ser atendido.
+   */
+  const [confirmarMaria, setConfirmarMaria] = useState(false);
+  const mariaAtiva = cliente?.maria_ativa !== false;
+
+  const toggleMaria = useMutation({
+    mutationFn: async () => {
+      const { error } = await externalSupabase
+        .from("clientes")
+        .update({ maria_ativa: !mariaAtiva })
+        .eq("id", cliente!.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({
+        title: mariaAtiva ? "Maria desativada para este cliente" : "Maria reativada",
+        description: mariaAtiva
+          ? "Ela não responde mais esse número. As mensagens continuam chegando na aba Conversas."
+          : "Ela volta a atender esse número normalmente.",
+      });
+      setConfirmarMaria(false);
+      qc.invalidateQueries({ queryKey: ["clientes"] });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Não deu para mudar", description: e.message, variant: "destructive" }),
   });
 
 
@@ -204,10 +351,19 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
 
   if (!cliente) return null;
 
-  const allEnd = [
+  // Os endereços CADASTRADOS são a fonte — cada linha carrega a sua própria
+  // coordenada. Os textos soltos de `clientes.enderecos[]` só entram quando ainda
+  // não viraram cadastro; sem esse filtro o mesmo endereço saía duas vezes, uma
+  // delas sem localização, e não dava para saber qual pin era de qual endereço.
+  const normEnd = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  const cadastrados = enderecosCad ?? [];
+  const jaCadastrado = new Set(
+    cadastrados.map((e) => normEnd(e.label_exibicao || e.rua || "")).filter(Boolean),
+  );
+  const soltos = [
     ...(cliente.enderecos ?? []),
     ...(cliente.endereco && !cliente.enderecos?.includes(cliente.endereco) ? [cliente.endereco] : []),
-  ].filter(Boolean);
+  ].filter((e): e is string => !!e && !jaCadastrado.has(normEnd(e)));
 
   const totalGasto = pedidos?.filter((p) => p.status !== "cancelado").reduce((s, p) => s + (p.valor_total ?? 0), 0) ?? 0;
 
@@ -225,17 +381,52 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
         </SheetHeader>
 
         <div className="space-y-2 mb-4">
-          {allEnd.map((end, i) => (
-            <EnderecoLink key={i} endereco={end} linhas={0} className="flex gap-2" />
-          ))}
-          {enderecosGPS?.map((e) => (
-            <a key={e.id}
-              href={`https://maps.google.com/?q=${e.latitude},${e.longitude}`}
-              target="_blank" rel="noreferrer"
-              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline">
-              <Navigation className="w-4 h-4 shrink-0" />
-              <span>{e.label_exibicao || `${e.latitude}, ${e.longitude}`}</span>
-            </a>
+          {cadastrados.map((e) => {
+            const texto = e.label_exibicao || e.rua || "Endereço sem descrição";
+            const temGps = e.latitude != null && e.longitude != null;
+            return (
+              <div key={e.id} className="flex items-start gap-2 text-sm">
+                <MapPin
+                  className={cn(
+                    "w-4 h-4 mt-0.5 shrink-0",
+                    temGps ? "text-status-ink-novo" : "text-muted-foreground",
+                  )}
+                />
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-x-2">
+                    <span className="break-words">{texto}</span>
+                    {e.principal && (
+                      <span className="text-xs text-muted-foreground">(principal)</span>
+                    )}
+                  </div>
+                  {e.referencia && (
+                    <div className="text-xs text-muted-foreground break-words">{e.referencia}</div>
+                  )}
+                  {temGps ? (
+                    <a
+                      href={`https://maps.google.com/?q=${e.latitude},${e.longitude}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-status-ink-novo hover:underline"
+                    >
+                      <Navigation className="w-3 h-3" /> Localização exata
+                    </a>
+                  ) : (
+                    <a
+                      href={mapsLink(texto)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:underline"
+                    >
+                      Buscar no mapa · sem localização salva
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {soltos.map((end, i) => (
+            <EnderecoLink key={`solto-${i}`} endereco={end} linhas={0} className="flex gap-2" />
           ))}
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <ShoppingBag className="w-4 h-4 shrink-0" />
@@ -247,6 +438,27 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
           </div>
         </div>
 
+        {role === "admin" && pedidoAtivoResumo && (
+          <div className="mb-4 rounded-xl border border-status-separacao/30 bg-status-separacao/5 p-3">
+            <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+              <PackageCheck className="w-3.5 h-3.5" />
+              Pedido em andamento · <StatusBadge status={pedidoAtivoResumo.status} />
+            </p>
+            <Button
+              className="w-full"
+              onClick={acionarBotaoPedido}
+              disabled={iniciandoSeparacao || confirmandoPagamento}
+            >
+              {iniciandoSeparacao || confirmandoPagamento
+                ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                : <Truck className="w-4 h-4 mr-2" />}
+              {pedidoAtivoResumo.status === "novo" && "Iniciar Separação"}
+              {pedidoAtivoResumo.status === "em_separacao" && "Despachar"}
+              {pedidoAtivoResumo.status === "saiu_para_entrega" && "Confirmar Entrega"}
+            </Button>
+          </div>
+        )}
+
         <div className="flex gap-2 mb-4">
           <Button size="sm" variant="outline" onClick={onEdit} className="flex-1">Editar dados</Button>
           <Button size="sm" variant="outline" asChild>
@@ -254,6 +466,55 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
               <Phone className="w-3.5 h-3.5 mr-1.5" /> WhatsApp
             </a>
           </Button>
+        </div>
+
+        <div className="mb-4">
+          {!mariaAtiva && (
+            <div className="mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+              <BotOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                A Maria está <strong>desativada</strong> para este cliente. As mensagens dele
+                chegam na aba Conversas, mas ninguém responde automaticamente.
+              </span>
+            </div>
+          )}
+
+          {confirmarMaria ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {mariaAtiva ? "Desativar a Maria para este cliente?" : "Reativar a Maria?"}
+              </span>
+              <Button
+                size="sm"
+                variant={mariaAtiva ? "destructive" : "default"}
+                onClick={() => toggleMaria.mutate()}
+                disabled={toggleMaria.isPending}
+              >
+                {toggleMaria.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                Confirmar
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmarMaria(false)}>
+                Cancelar
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() => setConfirmarMaria(true)}
+            >
+              {mariaAtiva ? (
+                <>
+                  <BotOff className="mr-1.5 h-3.5 w-3.5" /> Desativar Maria para este cliente
+                </>
+              ) : (
+                <>
+                  <Bot className="mr-1.5 h-3.5 w-3.5" /> Reativar Maria para este cliente
+                </>
+              )}
+            </Button>
+          )}
         </div>
 
 
@@ -358,6 +619,26 @@ function ClienteDrawer({ cliente, open, onClose, onEdit }: {
           pedidoId={fichaId}
           open={!!fichaId}
           onClose={() => setFichaId(null)}
+        />
+
+        {pedidoAtivo && (
+          <DespacharModal
+            pedido={pedidoAtivo}
+            entregadores={entregadoresAtivos ?? []}
+            open={despachando}
+            onClose={() => setDespachando(false)}
+            onDone={refetchPedidoDoCliente}
+          />
+        )}
+
+        <ConfirmarPagamentoModal
+          open={pagamentoPendente}
+          onClose={() => setPagamentoPendente(false)}
+          valorEsperado={pedidoAtivo?.valor_total}
+          pending={confirmandoPagamento}
+          onConfirmar={confirmarEntregaAgora}
+          titulo="Como foi pago?"
+          confirmLabel="Confirmar entrega"
         />
       </SheetContent>
     </Sheet>
@@ -566,7 +847,19 @@ export default function Clientes() {
                 className="w-full bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3 hover:bg-secondary transition-colors text-left">
                 <ClientAvatar nome={c.nome} fotoUrl={c.foto_url} telefone={c.telefone} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{c.nome ?? "Sem nome"}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium text-foreground truncate">{c.nome ?? "Sem nome"}</p>
+                    {/* Sem esta marca, "Maria desligada" só se descobre abrindo o cliente —
+                        e o sintoma (cliente que parou de ser respondido) é invisível. */}
+                    {c.maria_ativa === false && (
+                      <span
+                        title="Maria desativada para este cliente"
+                        className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive shrink-0"
+                      >
+                        <BotOff className="h-3 w-3" /> Maria off
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">{c.telefone}</p>
                 </div>
                 {allEnd.length > 0 && (

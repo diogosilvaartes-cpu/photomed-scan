@@ -42,10 +42,28 @@ export interface Pedido {
   resumo: string | null;
   tipo_fulfillment: string | null;
   endereco: string | null;
+  /**
+   * Aponta para a linha de `enderecos` usada neste pedido. `pedidos.endereco`
+   * continua sendo o texto que o cliente ditou (é o que o entregador lê), mas o
+   * casamento por texto perdia a coordenada quando a grafia variava: é por isso
+   * que a tabela `enderecos` estava com lat/lng NULL em todas as linhas.
+   */
+  endereco_id: string | null;
   pagamento: string | null;
   valor_total: number | null;
   pix_link: string | null;
   obs_entrega: string | null;
+  /** Preenchido ao cancelar pelo painel — o balcão precisa saber por que caiu. */
+  motivo_cancelamento: string | null;
+  /**
+   * Pagamento confirmado pelo BALCÃO ao fechar o pedido pelo Kanban/"Na rua",
+   * quando o entregador ainda não tinha registrado nada em `despacho_entrega`.
+   * A ficha mostra este campo como reserva do de `despacho_entrega`.
+   */
+  pagamento_recebido: ItemPagamento[] | null;
+  /** Última pessoa do balcão que mexeu no pedido. NULL = foi a Maria, sozinha. */
+  operador_id: string | null;
+  operador_nome: string | null;
   pessoa_recebimento: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -67,6 +85,19 @@ export interface EntregadorFull {
   ativo: boolean;
   user_id: string | null;
 }
+
+/**
+ * Motivos padrão de cancelamento — os mesmos nos 3 lugares onde dá pra
+ * cancelar um pedido (ficha, card do Kanban, tela do entregador). Fonte
+ * única para não divergir como já divergiu outras regras neste projeto.
+ */
+export const MOTIVOS_CANCELAMENTO = [
+  "Cliente desistiu",
+  "Sem estoque",
+  "Endereço errado",
+  "Cliente não atende",
+  "Pedido duplicado",
+];
 
 /** Select do PostgREST com tudo que a fila E a ficha precisam. */
 export const PEDIDO_SELECT =

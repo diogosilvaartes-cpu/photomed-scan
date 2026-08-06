@@ -11,6 +11,7 @@ import Estoque from "./pages/Estoque.tsx";
 import Pedidos from "./pages/Pedidos.tsx";
 import Login from "./pages/Login.tsx";
 import Clientes from "./pages/Clientes.tsx";
+import Conversas from "./pages/Conversas.tsx";
 import Entregas from "./pages/Entregas.tsx";
 import Equipe from "./pages/Equipe.tsx";
 import PedidoLink from "./pages/PedidoLink.tsx";
@@ -62,9 +63,10 @@ function AppRoutes() {
       {/* Entregador também acessa, em modo leitura (a própria página esconde as ações) */}
       <Route path="/pedidos" element={<ProtectedRoute><Pedidos /></ProtectedRoute>} />
       <Route path="/clientes" element={<ProtectedRoute><Clientes /></ProtectedRoute>} />
-      {/* Conversas virou aba dentro de /pedidos: atendimento e fila no mesmo lugar.
-          A rota antiga continua respondendo para não quebrar link salvo. */}
-      <Route path="/conversas" element={<Navigate to="/pedidos?aba=conversas" replace />} />
+      {/* Conversas voltou a ser tela própria (05/08) e agora divide a seção
+          "Atendimento" com Pedidos na navegação. Como aba dentro da fila, o
+          cliente parado esperando resposta ficava escondido atrás do Kanban. */}
+      <Route path="/conversas" element={<ProtectedRoute adminOnly><Conversas /></ProtectedRoute>} />
       <Route path="/entregas" element={<ProtectedRoute><Entregas /></ProtectedRoute>} />
       {/* Ao vivo e Histórico viraram sub-abas de /equipe, junto do cadastro. */}
       <Route path="/entregadores" element={<Navigate to="/equipe" replace />} />

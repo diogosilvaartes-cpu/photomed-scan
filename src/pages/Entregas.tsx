@@ -4,27 +4,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Truck, User, MapPin, Phone, Package, Loader2,
   CheckCircle, Clock, Navigation, Ban,
-  LocateFixed, LogOut, Camera, MessageSquare, X
+  LocateFixed, LogOut, Camera, MessageSquare, X, ChevronDown, ChevronUp
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { externalSupabase } from "@/integrations/supabase/external-client";
 import { useAuth } from "@/lib/auth";
 import CodigoPedido from "@/components/CodigoPedido";
 import EnderecoLink from "@/components/EnderecoLink";
+import MotivoCancelamento from "@/components/MotivoCancelamento";
+import ConfirmarPagamentoModal from "@/components/ConfirmarPagamentoModal";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -55,6 +48,8 @@ type PedidoEntrega = {
   resumo: string | null;
   status: string;
   endereco: string | null;
+  /** Liga o pedido à linha de `enderecos` — é o que faz a coordenada pousar certo. */
+  endereco_id: string | null;
   valor_total: number | null;
   pagamento: string | null;
   pessoa_recebimento: string | null;
@@ -111,18 +106,34 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   // Não bloqueia o fluxo, mas avisa na tela quando o WhatsApp não sai — foi o
   // silêncio total aqui que escondeu por semanas uma instância Z-API morta.
   async function notificarCliente(msg: string) {
-    if (!telefone) return;
+    // Sem telefone o envio era abandonado em silêncio — quem clicou ficava achando
+    // que o cliente tinha sido avisado. Agora todo caminho de falha aparece na tela.
+    if (!telefone) {
+      toast({
+        title: "Cliente não foi avisado",
+        description: "Esse pedido não tem telefone cadastrado. Avise o balcão.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       const r = await fetch("/api/notify-client", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: telefone.replace(/\D/g, ""), message: msg }),
       });
-      if (!r.ok) throw new Error(String(r.status));
-    } catch {
+      if (!r.ok) {
+        // O motivo real (Z-API recusou, sessão caída, número inválido) vale mais que
+        // "deu erro": é o que diz se o problema é do pedido ou do WhatsApp da loja.
+        const corpo = await r.json().catch(() => ({}));
+        throw new Error(corpo?.error ? String(corpo.error) : `HTTP ${r.status}`);
+      }
+    } catch (e) {
       toast({
         title: "Cliente não foi avisado",
-        description: "O status foi salvo, mas o WhatsApp não saiu. Avise o balcão.",
+        description: `O status foi salvo, mas o WhatsApp não saiu (${
+          e instanceof Error ? e.message : "falha de rede"
+        }). Avise o balcão.`,
         variant: "destructive",
       });
     }
@@ -130,24 +141,41 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
 
   const primeiroNome = nomeCliente.split(" ")[0];
 
+  /**
+   * Dispara o evento no WF5_Status_Entregador — o mesmo fluxo do botão do
+   * WhatsApp. É o n8n que marca a hora, avisa o cliente, atualiza o status e
+   * manda o próximo botão ao entregador.
+   *
+   * O painel NÃO grava a hora antes: os guards do WF5 (`saiu_em=is.null`) leem
+   * "já registrado" e param ali, engolindo a notificação. Era exatamente isso
+   * que fazia o cliente não ser avisado quando o toque vinha do painel.
+   */
+  async function dispararEvento(evento: "saiu" | "chegou") {
+    const r = await fetch("/api/entrega-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pedido_id: pedido.id, evento }),
+    });
+    if (!r.ok) {
+      const corpo = await r.json().catch(() => ({}));
+      throw new Error(corpo?.error ? String(corpo.error) : `HTTP ${r.status}`);
+    }
+  }
+
   const sairParaEntrega = useMutation({
-    mutationFn: async () => {
-      if (!despacho) return;
-      const { error } = await externalSupabase
-        .from("despacho_entrega")
-        .update({ saiu_em: new Date().toISOString() })
-        .eq("id", despacho.id);
-      if (error) throw error;
-      await externalSupabase.from("pedidos").update({ status: "saiu_para_entrega" }).eq("id", pedido.id);
-      await notificarCliente(
-        `Olá, ${primeiroNome}! 🛵 Seu pedido saiu para entrega. Em breve estará com você!`
-      );
-    },
+    mutationFn: () => dispararEvento("saiu"),
     onSuccess: () => {
-      toast({ title: "Saiu para entrega!" });
-      qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
+      toast({ title: "Saiu para entrega!", description: "O cliente foi avisado no WhatsApp." });
+      // O n8n grava de forma assíncrona; o refetch imediato ainda pega o valor
+      // antigo, então esperamos o suficiente para a linha já estar atualizada.
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["entregas-entregador"] }), 1500);
     },
-    onError: () => toast({ title: "Erro", variant: "destructive" }),
+    onError: (e: Error) =>
+      toast({
+        title: "Não deu para registrar a saída",
+        description: `${e.message}. O cliente NÃO foi avisado — tente de novo ou fale com o balcão.`,
+        variant: "destructive",
+      }),
   });
 
   /**
@@ -164,11 +192,12 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
    * pagamento). O balcão vê o cancelamento na fila em segundos.
    */
   const [confirmarCancelar, setConfirmarCancelar] = useState(false);
+  const [motivoCancelamento, setMotivoCancelamento] = useState("");
 
   const cancelarPedido = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (motivo: string) => {
       const { error } = await externalSupabase
-        .from("pedidos").update({ status: "cancelado" }).eq("id", pedido.id);
+        .from("pedidos").update({ status: "cancelado", motivo_cancelamento: motivo }).eq("id", pedido.id);
       if (error) throw error;
       if (despacho) {
         const { error: e2 } = await externalSupabase
@@ -183,6 +212,7 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         title: "Pedido cancelado",
         description: "Avise o balcão pelo WhatsApp para eles falarem com o cliente.",
       });
+      setMotivoCancelamento("");
       qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
     },
     onError: (e: Error) =>
@@ -190,28 +220,20 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
   });
 
   const chegarAoLocal = useMutation({
-    mutationFn: async () => {
-      if (!despacho) return;
-      const { error } = await externalSupabase
-        .from("despacho_entrega")
-        .update({ chegou_em: new Date().toISOString() })
-        .eq("id", despacho.id);
-      if (error) throw error;
-      await notificarCliente(
-        `Olá, ${primeiroNome}! 📍 Nosso entregador chegou ao seu endereço. Já vai chamar!`
-      );
-    },
+    mutationFn: () => dispararEvento("chegou"),
     onSuccess: () => {
-      toast({ title: "Chegada registrada!" });
-      qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
+      toast({ title: "Chegada registrada!", description: "O cliente foi avisado no WhatsApp." });
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["entregas-entregador"] }), 1500);
     },
-    onError: () => toast({ title: "Erro", variant: "destructive" }),
+    onError: (e: Error) =>
+      toast({
+        title: "Não deu para registrar a chegada",
+        description: `${e.message}. O cliente NÃO foi avisado — tente de novo ou fale com o balcão.`,
+        variant: "destructive",
+      }),
   });
 
   const [pagamentoOpen, setPagamentoOpen] = useState(false);
-  const [pagItems, setPagItems] = useState<ItemPagamento[]>([]);
-  const [pagForma, setPagForma] = useState("Dinheiro");
-  const [pagValor, setPagValor] = useState("");
 
   // ── Notas & Fotos ──────────────────────────────────────────────────────────
   // Três destinos diferentes, de propósito:
@@ -232,18 +254,25 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
 
   // A linha de `enderecos` só é buscada quando o entregador abre as notas —
   // não vale uma query por card só para o caso de alguém abrir.
+  // Agora roda sempre (não só com as notas abertas): o card mostra o link de
+  // localização exata, que é o que faz o entregador chegar na porta certa em vez
+  // de na rua com nome parecido. Busca por `endereco_id` quando existe — o
+  // casamento por texto é o mesmo que deixou a tabela sem coordenada nenhuma.
   const { data: enderecoRow } = useQuery({
-    queryKey: ["endereco-do-pedido", pedido.cliente_id, pedido.endereco],
+    queryKey: ["endereco-do-pedido", pedido.endereco_id, pedido.cliente_id, pedido.endereco],
     queryFn: async () => {
-      const { data } = await externalSupabase
+      const q = externalSupabase
         .from("enderecos")
-        .select("id, referencia, fotos")
-        .eq("cliente_id", pedido.cliente_id)
-        .eq("label_exibicao", pedido.endereco!)
-        .limit(1);
+        .select("id, referencia, fotos, latitude, longitude");
+      const { data } = pedido.endereco_id
+        ? await q.eq("id", pedido.endereco_id).limit(1)
+        : await q
+            .eq("cliente_id", pedido.cliente_id)
+            .eq("label_exibicao", pedido.endereco!)
+            .limit(1);
       return data?.[0] ?? null;
     },
-    enabled: notasOpen && !!pedido.endereco && !!pedido.cliente_id,
+    enabled: !!pedido.cliente_id && (!!pedido.endereco_id || !!pedido.endereco),
   });
 
   // Recarrega os campos toda vez que o painel abre: outra pessoa (ou o balcão)
@@ -325,23 +354,6 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
     }
   }
 
-  useEffect(() => {
-    if (pagamentoOpen) {
-      setPagItems(despacho?.pagamento_recebido ?? []);
-      setPagForma("Dinheiro");
-      setPagValor(pedido.valor_total?.toFixed(2) ?? "");
-    }
-  }, [pagamentoOpen]);
-
-  function addPagItem() {
-    const v = parseFloat(pagValor.replace(",", "."));
-    if (!v || v <= 0) return;
-    setPagItems((p) => [...p, { forma: pagForma, valor: v }]);
-    setPagValor("");
-  }
-
-  const totalPago = pagItems.reduce((s, i) => s + i.valor, 0);
-
   const marcarEntregue = useMutation({
     mutationFn: async (pagamentos: ItemPagamento[]) => {
       const { error } = await externalSupabase
@@ -356,15 +368,36 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
             pagamento_recebido: pagamentos.length ? pagamentos : null,
           })
           .eq("id", despacho.id);
-        // Se o entregador registrou localização GPS, atualizar as coordenadas do endereço do cliente
-        if (despacho.localizacao && pedido.endereco) {
+        // GPS do entregador vira a coordenada do endereço — é a localização mais
+        // confiável que existe, porque veio de alguém que chegou na porta.
+        //
+        // Casava por `label_exibicao` = texto exato, e era por isso que a tabela
+        // `enderecos` estava com latitude/longitude NULL em TODAS as linhas: basta
+        // uma vírgula ou maiúscula diferente entre o texto do pedido e o do cadastro
+        // para o update não achar nada — e ele falha em silêncio, sem erro.
+        // Com `endereco_id` o alvo é a linha certa.
+        //
+        // ⚠️ Só grava quando o endereço AINDA NÃO TEM coordenada: aí não há nada
+        // para substituir e não faz sentido perguntar. Havendo coordenada, quem
+        // decide é o entregador, pelo botão de compartilhar localização — trocar
+        // um ponto bom por outro é destrutivo e não pode acontecer sozinho.
+        const enderecoSemCoord = !(enderecoRow?.latitude != null && enderecoRow?.longitude != null);
+        if (enderecoSemCoord && despacho.localizacao && (pedido.endereco_id || pedido.endereco)) {
           const coords = despacho.localizacao.match(/^(-?\d+\.\d+),(-?\d+\.\d+)$/);
           if (coords) {
-            await externalSupabase
-              .from("enderecos")
-              .update({ latitude: parseFloat(coords[1]), longitude: parseFloat(coords[2]) })
-              .eq("cliente_id", pedido.cliente_id)
-              .eq("label_exibicao", pedido.endereco);
+            const patch = {
+              latitude: parseFloat(coords[1]),
+              longitude: parseFloat(coords[2]),
+            };
+            if (pedido.endereco_id) {
+              await externalSupabase.from("enderecos").update(patch).eq("id", pedido.endereco_id);
+            } else {
+              await externalSupabase
+                .from("enderecos")
+                .update(patch)
+                .eq("cliente_id", pedido.cliente_id)
+                .eq("label_exibicao", pedido.endereco!);
+            }
           }
         }
       }
@@ -379,6 +412,15 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
     },
     onError: () => toast({ title: "Erro", variant: "destructive" }),
   });
+
+  /**
+   * Coordenada recém-capturada esperando decisão: virar (ou não) a localização
+   * oficial DAQUELE endereço. Fica em estado, e não gravada direto, porque
+   * sobrescrever a coordenada boa de um endereço é destrutivo e silencioso — o
+   * entregador pode ter tocado no botão dentro do carro, a três quarteirões.
+   */
+  const [propostaLocal, setPropostaLocal] = useState<string | null>(null);
+  const [salvandoLocal, setSalvandoLocal] = useState(false);
 
   const compartilharLocalizacao = useMutation({
     mutationFn: async () => {
@@ -396,6 +438,8 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
     },
     onSuccess: (loc) => {
       toast({ title: "Localização salva!", description: loc });
+      // Sem endereço cadastrado não há o que substituir — nada a perguntar.
+      if (loc && (pedido.endereco_id || enderecoRow?.id)) setPropostaLocal(loc);
       qc.invalidateQueries({ queryKey: ["entregas-entregador"] });
     },
     onError: (err: unknown) => {
@@ -403,6 +447,34 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
       toast({ title: "Não foi possível obter localização", description: msg, variant: "destructive" });
     },
   });
+
+  /** Grava a coordenada proposta no endereço DESTE pedido. */
+  async function aplicarLocalNoEndereco() {
+    if (!propostaLocal) return;
+    const m = propostaLocal.match(/^(-?\d+\.?\d*),(-?\d+\.?\d*)$/);
+    if (!m) { setPropostaLocal(null); return; }
+
+    setSalvandoLocal(true);
+    const patch = { latitude: parseFloat(m[1]), longitude: parseFloat(m[2]) };
+    // Por id sempre que houver: casar por texto é o que deixou a tabela inteira
+    // sem coordenada, e aqui erraria de endereço em vez de só falhar.
+    const alvo = pedido.endereco_id ?? enderecoRow?.id ?? null;
+    const { error } = alvo
+      ? await externalSupabase.from("enderecos").update(patch).eq("id", alvo)
+      : { error: new Error("Endereço não identificado") };
+    setSalvandoLocal(false);
+
+    if (error) {
+      toast({ title: "Não deu para salvar no endereço", description: error.message, variant: "destructive" });
+      return;
+    }
+    setPropostaLocal(null);
+    qc.invalidateQueries({ queryKey: ["endereco-do-pedido"] });
+    toast({
+      title: "Localização do endereço atualizada",
+      description: "As próximas entregas neste endereço já usam este ponto.",
+    });
+  }
 
   const mapsUrl = pedido.endereco
     ? /^-?\d+\.\d+,-?\d+\.\d+$/.test(pedido.endereco.trim())
@@ -469,8 +541,58 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
 
       {/* Endereço — clicável: o entregador precisa do caminho, não do texto */}
       {pedido.endereco && (
-        <div className="bg-secondary rounded-lg px-3 py-2">
+        <div className="bg-secondary rounded-lg px-3 py-2 space-y-1">
           <EnderecoLink endereco={pedido.endereco} linhas={0} className="flex gap-2" />
+          {/* A coordenada deste endereço específico. Buscar pelo nome joga o
+              entregador no meio da rua (quando o OSM conhece a rua); o pin leva
+              na porta. Só aparece quando ESTE endereço tem localização salva. */}
+          {enderecoRow?.latitude != null && enderecoRow?.longitude != null && (
+            <a
+              href={`https://maps.google.com/?q=${enderecoRow.latitude},${enderecoRow.longitude}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-status-ink-rua hover:underline"
+            >
+              <Navigation className="w-3.5 h-3.5" />
+              Ir pela localização exata
+            </a>
+          )}
+          {enderecoRow?.referencia && (
+            <p className="text-xs text-muted-foreground">📍 {enderecoRow.referencia}</p>
+          )}
+
+          {/* Recém-capturada, esperando decisão. Diz claramente se vai SUBSTITUIR
+              um ponto que já existe ou salvar o primeiro — são coisas diferentes
+              e só uma delas é destrutiva. */}
+          {propostaLocal && (
+            <div className="mt-1 rounded-lg border border-status-novo/40 bg-status-novo/10 p-2">
+              <p className="text-xs font-semibold text-status-ink-novo">
+                {enderecoRow?.latitude != null
+                  ? "Substituir a localização salva deste endereço pela sua posição atual?"
+                  : "Salvar sua posição atual como a localização deste endereço?"}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Vale para as próximas entregas neste endereço, não só para esta.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); aplicarLocalNoEndereco(); }}
+                  disabled={salvandoLocal}
+                  className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-status-novo text-xs font-bold text-white disabled:opacity-60"
+                >
+                  {salvandoLocal && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {enderecoRow?.latitude != null ? "Substituir" : "Salvar"}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setPropostaLocal(null); }}
+                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+                >
+                  Agora não
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -529,15 +651,16 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
       <div>
         <button
           onClick={() => setNotasOpen(v => !v)}
-          className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full">
-          <MessageSquare className="w-3.5 h-3.5" />
-          {notasOpen
-            ? "Fechar notas"
-            : `Notas & Fotos${
-                despacho?.observacao || despacho?.fotos?.length || pedido.clientes?.anotacoes_entregador
-                  ? " ✓"
-                  : ""
-              }`}
+          className="flex items-center justify-between gap-2 w-full h-10 px-3 rounded-xl text-sm font-semibold bg-status-separacao/10 text-status-ink-separacao hover:bg-status-separacao/20 transition-colors border border-status-separacao/30">
+          <span className="flex items-center gap-2">
+            <MessageSquare className="w-4 h-4" />
+            {`Notas & Fotos${
+              despacho?.observacao || despacho?.fotos?.length || pedido.clientes?.anotacoes_entregador
+                ? " ✓"
+                : ""
+            }`}
+          </span>
+          {notasOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
         {notasOpen && (
           <div className="mt-2 space-y-3">
@@ -738,10 +861,13 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
               Cancelar pedido
             </Button>
 
-            <AlertDialog open={confirmarCancelar} onOpenChange={setConfirmarCancelar}>
+            <AlertDialog
+              open={confirmarCancelar}
+              onOpenChange={(v) => { setConfirmarCancelar(v); if (!v) setMotivoCancelamento(""); }}
+            >
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Cancelar o pedido {pedido.codigo ?? ""}?</AlertDialogTitle>
+                  <AlertDialogTitle>Cancelar o pedido {pedido.codigo ?? ""}? Por quê?</AlertDialogTitle>
                   <AlertDialogDescription>
                     {nomeCliente}
                     {pedido.itens_pedido?.length
@@ -753,11 +879,13 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
                     <b> não</b> é avisado automaticamente — combine com o balcão.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
+                <MotivoCancelamento value={motivoCancelamento} onChange={setMotivoCancelamento} />
                 <AlertDialogFooter>
                   <AlertDialogCancel>Voltar</AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={() => cancelarPedido.mutate()}
-                    className="bg-status-cancelado text-white hover:bg-status-cancelado/90"
+                    onClick={() => cancelarPedido.mutate(motivoCancelamento)}
+                    disabled={!motivoCancelamento.trim()}
+                    className="bg-status-cancelado text-white hover:bg-status-cancelado/90 disabled:opacity-50"
                   >
                     Cancelar pedido
                   </AlertDialogAction>
@@ -778,70 +906,14 @@ function CardEntregaEntregador({ pedido }: { pedido: PedidoEntrega }) {
         </div>
       ) : null}
 
-      {/* Modal de pagamento */}
-      <Dialog open={pagamentoOpen} onOpenChange={setPagamentoOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Confirmar entrega</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-1">
-            {pedido.valor_total != null && (
-              <div className="flex justify-between items-center bg-secondary rounded-xl px-4 py-3">
-                <span className="text-sm text-muted-foreground">Valor esperado</span>
-                <span className="text-lg font-bold text-foreground">R$ {pedido.valor_total.toFixed(2)}</span>
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label>Adicionar pagamento</Label>
-              <div className="flex gap-2">
-                <select
-                  value={pagForma}
-                  onChange={(e) => setPagForma(e.target.value)}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm flex-1">
-                  {["Dinheiro", "Pix", "Cartão Débito", "Cartão Crédito", "Outro"].map((f) => (
-                    <option key={f}>{f}</option>
-                  ))}
-                </select>
-                <Input
-                  type="number" step="0.01" min="0"
-                  placeholder="0,00"
-                  value={pagValor}
-                  onChange={(e) => setPagValor(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addPagItem()}
-                  className="w-28" />
-                <Button type="button" size="sm" variant="outline" onClick={addPagItem}>+</Button>
-              </div>
-            </div>
-            {pagItems.length > 0 && (
-              <div className="space-y-1">
-                {pagItems.map((p, i) => (
-                  <div key={i} className="flex justify-between items-center text-sm bg-secondary rounded-lg px-3 py-1.5">
-                    <span>{p.forma}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">R$ {p.valor.toFixed(2)}</span>
-                      <button onClick={() => setPagItems((prev) => prev.filter((_, idx) => idx !== i))}
-                        className="text-muted-foreground hover:text-destructive text-xs">✕</button>
-                    </div>
-                  </div>
-                ))}
-                <div className="flex justify-between text-sm font-semibold px-3 pt-1">
-                  <span>Total recebido</span>
-                  <span className={totalPago >= (pedido.valor_total ?? 0) ? "text-money" : "text-status-ink-separacao"}>
-                    R$ {totalPago.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPagamentoOpen(false)}>Cancelar</Button>
-            <Button onClick={() => marcarEntregue.mutate(pagItems)} disabled={marcarEntregue.isPending}>
-              {marcarEntregue.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-              Confirmar entrega
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmarPagamentoModal
+        open={pagamentoOpen}
+        onClose={() => setPagamentoOpen(false)}
+        valorEsperado={pedido.valor_total}
+        itensIniciais={despacho?.pagamento_recebido ?? []}
+        pending={marcarEntregue.isPending}
+        onConfirmar={(pagamentos) => marcarEntregue.mutate(pagamentos)}
+      />
     </div>
   );
 }

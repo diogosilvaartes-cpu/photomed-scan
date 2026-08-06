@@ -1,10 +1,13 @@
 import { ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Package, Users, Truck, LogOut, Search, ClipboardList, UsersRound } from "lucide-react";
+import { Package, Users, Truck, LogOut, Search, ClipboardList, UsersRound, MessagesSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/BrandMark";
 import EntregaToggle from "@/components/EntregaToggle";
+import MariaToggle from "@/components/MariaToggle";
 import FarmaciaToggle from "@/components/FarmaciaToggle";
+import { useQuery } from "@tanstack/react-query";
+import { fetchConversas, agruparPorTelefone, statusPausa } from "@/pages/Conversas";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -14,13 +17,18 @@ interface NavItem {
   label: string;
   adminOnly?: boolean;
   entregadorOnly?: boolean;
+  /** Cabeçalho sob o qual o item aparece. Sem grupo, fica solto no topo. */
+  grupo?: string;
 }
 
 /** Ordem de trabalho do balcão: a fila primeiro, o resto em volta dela. */
 const NAV_ITEMS: NavItem[] = [
-  // Conversas não está mais aqui: virou aba dentro de Pedidos, junto da fila —
-  // ver quem a Maria está atendendo faz parte de olhar o mesmo movimento.
-  { to: "/pedidos", icon: <ClipboardList className="w-5 h-5" />, label: "Pedidos" },
+  // ATENDIMENTO: as duas telas onde alguém está esperando resposta. Conversas
+  // era uma aba dentro de Pedidos e voltou a ser rota própria — misturadas, a
+  // fila (que se resolve sozinha) escondia o cliente parado no WhatsApp.
+  { to: "/pedidos", icon: <ClipboardList className="w-5 h-5" />, label: "Pedidos", grupo: "Atendimento" },
+  { to: "/conversas", icon: <MessagesSquare className="w-5 h-5" />, label: "Conversas", grupo: "Atendimento" },
+
   { to: "/estoque", icon: <Package className="w-5 h-5" />, label: "Estoque", adminOnly: true },
   { to: "/clientes", icon: <Users className="w-5 h-5" />, label: "Clientes" },
   // Equipe engloba os entregadores: cadastro, Ao vivo e Histórico moram lá dentro.
@@ -36,34 +44,78 @@ function useNavItems() {
   return NAV_ITEMS.filter((i) => {
     if (i.adminOnly && role !== "admin") return false;
     if (i.entregadorOnly && role === "admin") return false;
+    // O entregador não atende no WhatsApp — Conversas é do balcão.
+    if (i.to === "/conversas" && role !== "admin") return false;
     return true;
   });
 }
 
+/**
+ * Quantas conversas estão paradas esperando o balcão.
+ *
+ * Mesma `queryKey` que a tela de Conversas usa — o react-query serve as duas do
+ * mesmo cache, então isto não é uma segunda ida ao banco. Ficava dentro da aba
+ * em Pedidos; com Conversas de volta ao menu, o número precisa aparecer aqui,
+ * senão só se descobre que tem cliente esperando entrando na tela.
+ */
+function useConversasEmEspera() {
+  const { role } = useAuth();
+  const { data } = useQuery({
+    queryKey: ["conversas"],
+    queryFn: fetchConversas,
+    refetchInterval: 20_000,
+    enabled: role === "admin",
+  });
+  return agruparPorTelefone(data ?? []).filter(
+    (g) => statusPausa(g.principal.estado, g.principal.pausada_ate).pausada,
+  ).length;
+}
+
 function NavItems({ onClick }: { onClick?: () => void }) {
   const items = useNavItems();
+  const emEspera = useConversasEmEspera();
+
+  // Agrupa preservando a ordem de NAV_ITEMS; o cabeçalho sai uma vez, no primeiro
+  // item do grupo. Itens sem grupo continuam como antes, sem título nenhum.
+  let grupoAtual: string | undefined;
 
   return (
     <nav className="flex flex-col gap-1 px-3">
-      {items.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.to === "/"}
-          onClick={onClick}
-          className={({ isActive }) =>
-            cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
-              isActive
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
-            )
-          }
-        >
-          {item.icon}
-          {item.label}
-        </NavLink>
-      ))}
+      {items.map((item) => {
+        const abreGrupo = item.grupo && item.grupo !== grupoAtual;
+        if (item.grupo) grupoAtual = item.grupo;
+
+        return (
+          <div key={item.to}>
+            {abreGrupo && (
+              <p className="px-3 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-sidebar-foreground/50">
+                {item.grupo}
+              </p>
+            )}
+            <NavLink
+              to={item.to}
+              end={item.to === "/"}
+              onClick={onClick}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
+                  isActive
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+                )
+              }
+            >
+              {item.icon}
+              {item.label}
+              {item.to === "/conversas" && emEspera > 0 && (
+                <span className="ml-auto rounded-full bg-status-rua px-2 py-0.5 text-xs font-bold text-white animate-pulse">
+                  {emEspera}
+                </span>
+              )}
+            </NavLink>
+          </div>
+        );
+      })}
     </nav>
   );
 }
@@ -116,17 +168,21 @@ function SidebarContent() {
         </div>
       </div>
 
-      {/* Os dois estados que decidem o que a Maria responde, no topo e nesta ordem:
-          "a farmácia atende?" vem antes de "a farmácia entrega?" — fechada, o
-          toggle de entrega não muda nada para o cliente. */}
-      <div className="pt-4">
-        <FarmaciaToggle />
-        <EntregaToggle />
+      {/* Navegação — agora no topo, que é o que o balcão usa o tempo todo. */}
+      <div className="flex-1 py-4 overflow-y-auto">
+        <NavItems />
       </div>
 
-      {/* Navegação */}
-      <div className="flex-1 pb-4 overflow-y-auto">
-        <NavItems />
+      {/* Os três estados que decidem o que a Maria responde. Foram para o rodapé
+          e em formato compacto: são chaves de exceção (o balcão mexe poucas
+          vezes ao dia), e ocupando o topo empurravam a navegação para baixo.
+          A ordem é a de consequência: "a farmácia atende?" antes de "entrega?"
+          — fechada, o toggle de entrega não muda nada para o cliente — e a Maria
+          por último, que é o mais raro e o mais caro de acionar por engano. */}
+      <div className="border-t border-sidebar-border pt-2">
+        <FarmaciaToggle variant="compacto" />
+        <EntregaToggle variant="compacto" />
+        <MariaToggle variant="compacto" />
       </div>
 
       {/* Usuário */}
@@ -149,6 +205,7 @@ function MobileNav() {
           alcançar sem rolar. Mesma ordem da sidebar. */}
       <FarmaciaToggle variant="mobile" />
       <EntregaToggle variant="mobile" />
+      <MariaToggle variant="mobile" />
       {items.map((item) => (
         <NavLink
           key={item.to}

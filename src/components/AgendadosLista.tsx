@@ -234,13 +234,14 @@ function Card({
           {a.respondido_em ? ` · respondeu ${hora(a.respondido_em)}` : ""}
         </p>
 
-        {/* Liberou mas o cliente ainda não recebeu: quem envia é o
-            WF_Agendamento_Liberar, no tique de 5 min. Sem este aviso o balcão
-            clica de novo achando que não funcionou. */}
+        {/* O envio agora é disparado na hora pelo botão (webhook
+            `agendamento-liberar`). Este aviso ficou para o caso de o disparo
+            imediato falhar: o Schedule de 5 min é a rede de segurança e pega o
+            agendamento no tique seguinte. */}
         {esperandoEnvio && (
           <p className="mt-2 flex items-start gap-1.5 text-[11px] font-semibold text-status-ink-separacao bg-status-separacao/10 border border-status-separacao/25 rounded-lg px-2.5 py-1.5">
             <Timer className="w-3.5 h-3.5 shrink-0 mt-px" />
-            Liberado. O cliente recebe os botões no WhatsApp em até 5 minutos.
+            Enviando… se não chegar agora, o cliente recebe no próximo ciclo (até 5 min).
           </p>
         )}
 
@@ -269,14 +270,14 @@ function Card({
             <button
               onClick={liberar}
               disabled={liberando}
-              title="Manda os botões CONFIRMAR / CANCELAR no WhatsApp do cliente"
+              title="Envia agora os botões CONFIRMAR / CANCELAR no WhatsApp do cliente"
               className={cn(
                 "inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-colors",
                 liberando && "opacity-60 cursor-not-allowed",
               )}
             >
               {liberando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              Pedir confirmação
+              Enviar confirmação pro cliente
             </button>
           )}
 
