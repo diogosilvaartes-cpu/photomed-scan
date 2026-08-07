@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlarmClock, AlertTriangle, Ban, CheckCircle2, Clock, Loader2, MessageCircle, Send, Timer } from "lucide-react";
+import { AlarmClock, AlertTriangle, Ban, CheckCircle2, Clock, Loader2, MessageCircle, Send, Timer, Truck } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -50,8 +50,12 @@ export const AGENDADO_SELECT =
   "id,codigo,cliente_id,telefone,nome_cliente,itens,resumo,tipo_fulfillment,endereco," +
   "pagamento,valor_total,status,motivo,pedido_id,abre_em,liberado_em,confirmacao_enviada_em,respondido_em,created_at";
 
-/** Ainda vivos: é o que o balcão precisa acompanhar. O resto é histórico. */
-export const AGENDADO_PENDENTES = ["aguardando_abertura", "aguardando_confirmacao", "revisao_manual"];
+/** Ainda vivos: é o que o balcão precisa acompanhar. O resto é histórico.
+ * `aguardando_entrega` é o irmão de `aguardando_abertura` — nasce quando o
+ * pedido chega com a entrega desligada (farmácia aberta), ver
+ * AGENDAMENTO/09_agendar_sem_entrega.js. Faltar aqui derruba os botões do
+ * card pra seção Encerrados mesmo com o agendamento ainda vivo. */
+export const AGENDADO_PENDENTES = ["aguardando_abertura", "aguardando_entrega", "aguardando_confirmacao", "revisao_manual"];
 
 type Cfg = { label: string; Icon: typeof Clock; chip: string; faixa: string; ajuda: string };
 
@@ -69,6 +73,13 @@ const CFG: Record<string, Cfg> = {
     chip: "bg-status-novo/10 text-status-ink-novo border border-status-novo/30",
     faixa: "bg-status-novo",
     ajuda: "Já mandamos os botões no WhatsApp. Aguardando o cliente confirmar.",
+  },
+  aguardando_entrega: {
+    label: "Esperando a entrega voltar",
+    Icon: Truck,
+    chip: "bg-status-separacao/10 text-status-ink-separacao border border-status-separacao/30",
+    faixa: "bg-status-separacao",
+    ajuda: "Farmácia aberta, mas a entrega está desligada. O cliente é chamado assim que ela voltar.",
   },
   revisao_manual: {
     label: "Precisa de ajuste",
